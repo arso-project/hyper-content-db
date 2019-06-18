@@ -12,7 +12,7 @@
   "dependencies": {
     "hypercore-crypto": "^1.0.0",
     "hyperdrive": "^10.0.0-rc2",
-    "hypertrie-index": "^1.0.0",
+    "hypertrie-index": "github:Frando/hypertrie-index",
     "mutexify": "^1.2.0",
     "pump": "^3.0.0",
     "random-access-file": "^2.1.3",
