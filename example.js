@@ -9,14 +9,16 @@ function contentview (name, opts) {
   const log = (opts && opts.log) || require('debug')('contentview.' + name)
   const contentview = {
     readFile: true,
-    map: function (msg, next) {
-      log('MSG', msg.driveKey.toString('hex'))
-      log(msg)
-      if (msg.fileContent) {
-        log(' -> CONTENT', msg.fileContent.toString())
-      } else {
-        log(' -> NO FILE CONTENT')
-      }
+    map: function (msgs, done) {
+      forAll(msgs, done, (msg, next) => {
+        log('MSG', msg.driveKey.toString('hex'))
+        log(msg)
+        if (msg.fileContent) {
+          log(' -> CONTENT', msg.fileContent.toString())
+        } else {
+          log(' -> NO FILE CONTENT')
+        }
+      })
       // next()
     }
   }
@@ -42,19 +44,12 @@ function secondCore (core1) {
     core2.use('contentview', contentview('core2'))
     core2.writer((err, drive) => {
       let msg = 'hi, my key is ' + drive.key.toString('hex')
-      drive.writeFile('second.txt', msg)
-      log2('file written')
-      replicate (core1, core2)
+      drive.writeFile('second.txt', msg, (err) => {
+        log2('file written')
+        replicate(core1, core2, () => connect(core1, core2))
+      })
     })
   })
-}
-
-function replicate (core1, core2) {
-  console.log('REPLICATE')
-  const stream1 = core1.replicate()
-  const stream2 = core2.replicate()
-  pump(stream1, stream2, stream1)
-  setTimeout(() => connect(core1, core2), 500)
 }
 
 function connect (core1, core2) {
@@ -64,7 +59,23 @@ function connect (core1, core2) {
   core2.writer((err, drive2) => {
     core1.addSource(drive2.key, (err, done) => {
       log1('Added source:', drive2.key.toString('hex'))
+      setTimeout(() => replicate(core1, core2, () => {
+        console.log('SECOND repl finished')
+      }, 150))
     })
   })
 }
 
+function forAll (msgs, done, fn) {
+  let missing = msgs.length
+  for (let msg of msgs) {
+    fn(msg, () => {
+      if (--missing === 0) done()
+    })
+  }
+}
+
+function replicate (a, b, cb) {
+  var stream = a.replicate()
+  stream.pipe(b.replicate()).pipe(stream).on('end', cb)
+}

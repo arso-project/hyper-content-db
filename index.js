@@ -74,6 +74,7 @@ class Multidrive extends EventEmitter {
 
       this.sources.set(hex(drive.key), drive)
       this.emit('source', drive)
+      console.log('EMIT', drive.key.toString('hex'))
 
       drive.readdir(P_SOURCES, (err, list) => {
         // console.log('DRIVE READDIR', err, list)
@@ -93,7 +94,7 @@ class Multidrive extends EventEmitter {
   _addSource (key, opts, cb) {
     // console.log('as', key, opts, cb)
     if (typeof opts === 'function') return this._addSource(key, null, opts)
-    const drive = hyperdrive(this.storage(hex(key)), key)
+    const drive = hyperdrive(this.storage(hex(key)), key, opts)
     this._pushSource(drive, cb)
   }
 
@@ -126,10 +127,11 @@ class Multidrive extends EventEmitter {
       if (this.primaryDrive.writable) {
         finish(null, this.primaryDrive)
       } else {
-        self.writerLock(_release => {
-          release = _release
-          readKey()
-        })
+        readKey()
+        // self.writerLock(_release => {
+        //   release = _release
+        //   readKey()
+        // })
       }
     })
 
@@ -151,7 +153,6 @@ class Multidrive extends EventEmitter {
     }
 
     function makeWriter (keyPair) {
-      // console.log('mw', keyPair)
       const { publicKey, secretKey } = keyPair
       self._addSource(publicKey, { secretKey }, finish)
     }
@@ -180,6 +181,7 @@ class Multidrive extends EventEmitter {
     }
 
     this.on('source', drive => {
+      console.log('ADD TO REPL')
       drive.replicate({
         live: opts.live,
         download: opts.download,

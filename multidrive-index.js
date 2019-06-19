@@ -11,7 +11,8 @@ class MultidriveIndex {
     this._map = opts.map
     this._readFile = opts.readFile
 
-    this._states = {}
+    this._states = new Map()
+    this._indexes = new Map()
 
     if (!opts.storeState && !opts.fetchState && !opts.clearIndex) {
     // In-memory storage implementation
@@ -44,6 +45,7 @@ class MultidriveIndex {
   }
 
   source (drive) {
+    console.log('new source', drive.key.toString('hex').substring(0, 5))
     const self = this
     const opts = {
       map,
@@ -51,55 +53,74 @@ class MultidriveIndex {
       fetchState: (cb) => this._fetchDriveState(drive.key, cb)
     }
     const index = hypertrieIndex(drive._db, opts)
+    this._indexes.set(drive.key, index)
     // const index = hypertrieIndex(drive, opts)
-    function map (msg) {
-      msg = hypertrieIndex.transformNode(msg, Stat)
-      msg.driveKey = drive.key
-      if (self._readFile) {
-        const checkout = drive.checkout(msg.seq)
-        checkout.readFile(msg.key, (err, data) => {
-          if (err) finish(err, msg)
-          msg.fileContent = data
-          finish(null, msg)
-        })
-      } else {
-        finish (null, msg)
-      }
+    function map (msgs, done) {
+      console.log('MAP on', drive.key.toString('hex').substring(0, 5))
+      collect(msgs, finish, (msg, next) => {
+        msg = hypertrieIndex.transformNode(msg, Stat)
+        msg.driveKey = drive.key
+        if (self._readFile) {
+          const checkout = drive.checkout(msg.seq)
+          checkout.readFile(msg.key, (err, data) => {
+            if (err) next(err, msg)
+            msg.fileContent = data
+            next(null, msg)
+          })
+        } else {
+          next(null, msg)
+        }
+      })
 
-      function finish (err, msg) {
+      function finish (err, msgs) {
         // todo: handle err
-        self._map(msg)
+        self._map(msgs, done)
       }
     }
   }
 
   _storeDriveState (key, state, cb) {
-    this._states[key] = state
-    let buf = this._encodeStates(states)
+    this._states.set(key, state)
+    let buf = this._encodeStates()
     this._storeState(buf, cb)
   }
 
   _fetchDriveState (key, cb) {
     this._fetchState((err, data) => {
       if (err) return cb(err)
-      const states = this._decodeStates(data)
-      const state = states[key]
+      this._decodeStates(data)
+      const state = this._states.get(key)
       cb(null, state)
     })
   }
 
   _encodeStates () {
-    const states = this._states.entries.map((key, state) => ({ key, state }))
+    const states = []
+    for (let [key, state] of this._states.entries()) {
+      states.push({ key, state })
+    }
     return State.encode({ states })
   }
 
   _decodeStates (buf) {
     if (!buf) return {}
-    let states = State.decode(buf)
-    this._states = states.reduce((agg, row) => {
-      agg[row.key] = row.state
-      return agg
-    }, {})
+    let value = State.decode(buf)
+    value.states.forEach(({ key, state }) => {
+      this._states.set(key, state)
+    })
     return this._states
   }
+}
+
+function collect (msgs, done, fn) {
+  let missing = msgs.length
+  let nextMsgs = []
+  let errors = []
+  msgs.forEach((msg, i) => {
+    fn(msg, (err, msg) => {
+      if (err) errors[i] = err
+      nextMsgs[i] = msg
+      if (--missing === 0) done(errors.length ? errors : null, nextMsgs)
+    })
+  })
 }
