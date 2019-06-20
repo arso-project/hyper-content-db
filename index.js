@@ -1,21 +1,20 @@
-const hyperdrive = require('hyperdrive')
 const thunky = require('thunky')
 const p = require('path')
-const mutexify = require('mutexify')
 const { EventEmitter } = require('events')
-const raf = require('random-access-file')
-const crypto = require('hypercore-crypto')
+const hyperid = require('hyperid')
 
+const multidrive = require('./multidrive')
 const kappa = require('./kappa')
 
-const P_SOURCES = '.sources'
+const P_DATA = '.data'
 
 module.exports = (...args) => new Contentcore(...args)
+module.exports.id = () => Contentcore.id()
 
 class Contentcore extends EventEmitter {
   constructor (storage, key, opts) {
     super()
-    this.multidrive = new Multidrive(storage, key, opts)
+    this.multidrive = multidrive(storage, key, opts)
     this.kcore = kappa({ multidrive: this.multidrive })
     this.ready = thunky(this._ready.bind(this))
   }
@@ -43,168 +42,101 @@ class Contentcore extends EventEmitter {
   addSource (key, cb) {
     this.multidrive.addSource(key, cb)
   }
+
+  sources (cb) {
+    this.multidrive.sources(cb)
+  }
+
+  putRecord (schema, id, record, cb) {
+    // Schema names have to have exactly one slash.
+    if (!validateSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
+
+    this.writer((err, drive) => {
+      if (err) return cb(err)
+      const path = makePath(schema, id)
+      const buf = Buffer.from(JSON.stringify(record))
+      drive.writeFile(path, buf, (err) => {
+        if (err) return cb(err)
+        cb(null, id)
+      })
+    })
+  }
+
+  getRecords (schema, id, cb) {
+    if (!validateSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
+    const records = []
+    const errors = []
+    let missing = 0
+    this.sources((err, drives) => {
+      if (err) return cb(err)
+      drives.forEach(drive => {
+        missing++
+        const path = makePath(schema, id)
+        const key = hex(drive.key)
+        const msg = { path, source: key, id, schema }
+        drive.stat(path, (err, stat) => {
+          if (err) return onrecord(null)
+          drive.readFile(path, (err, buf) => {
+            msg.stat = stat
+            if (err) return onrecord({ ...msg, error: err })
+            try {
+              const value = JSON.parse(buf.toString())
+              msg.value = value
+              onrecord(msg)
+            } catch (err) {
+              onrecord({ ...msg, error: err })
+            }
+          })
+        })
+      })
+    })
+
+    function onrecord (msg) {
+      if (msg && msg.error) errors.push(msg)
+      else if (msg) records.push(msg)
+      if (--missing === 0) {
+        let error = errors.length ? errors : null
+        cb(error, records)
+      }
+    }
+  }
+
+  listRecords (schema, cb) {
+    let ids = []
+    let missing = 0
+    this.sources((err, drives) => {
+      if (err) return cb(err)
+      drives.forEach(drive => {
+        let path = p.join(P_DATA, schema)
+        missing++
+        drive.readdir(path, (err, list) => {
+          if (err) return finish(err)
+          if (!list.length) return finish()
+          list = list.map(id => id.replace(/\.json$/, ''))
+          finish(null, list)
+        })
+      })
+    })
+
+    function finish (err, list) {
+      if (!err && list) {
+        ids = [...ids, ...list]
+      }
+      if (--missing === 0) cb(null, list)
+    }
+  }
 }
 
-class Multidrive extends EventEmitter {
-  constructor (storage, key, opts) {
-    super()
-    this.storage = name => nestStorage(storage, name)
+Contentcore.id = hyperid({ fixedLength: true, urlSafe: true })
 
-    this.primaryDrive = hyperdrive(this.storage('primary'), key)
+function makePath (schema, id) {
+  return p.join(P_DATA, schema, id + '.json')
+}
 
-    this.ready = thunky(this._ready.bind(this))
-
-    this.writerLock = mutexify()
-
-    this.sources = new Map()
-  }
-
-  _ready (cb) {
-    this.primaryDrive.ready(err => {
-      if (err) return cb(err)
-      this.key = this.primaryDrive.key
-      this._pushSource(this.primaryDrive, cb)
-    })
-  }
-
-  _pushSource (drive, cb) {
-    cb = cb || noop
-    drive.ready(err => {
-      if (err) return cb(err)
-
-      this.sources.set(hex(drive.key), drive)
-      this.emit('source', drive)
-      console.log('EMIT', drive.key.toString('hex'))
-
-      drive.readdir(P_SOURCES, (err, list) => {
-        // console.log('DRIVE READDIR', err, list)
-        if (err || !list.length) return cb(err, drive)
-        let missing = list.length
-        for (let source of list) {
-          this._addSource(source, finish)
-        }
-        function finish (err) {
-          if (err) return cb(err, drive)
-          if (--missing === 0) cb(null, drive)
-        }
-      })
-    })
-  }
-
-  _addSource (key, opts, cb) {
-    // console.log('as', key, opts, cb)
-    if (typeof opts === 'function') return this._addSource(key, null, opts)
-    const drive = hyperdrive(this.storage(hex(key)), key, opts)
-    this._pushSource(drive, cb)
-  }
-
-  _writeSource (key, cb) {
-    this.writer(drive => {
-      drive.writeFile(p.join(P_SOURCES, hex(key)), Buffer.alloc(0), cb)
-    })
-  }
-
-  addSource (key, cb) {
-    this.ready(() => {
-      if (this.sources.has(hex(key))) return cb(null, this.sources.get(key))
-      this._addSource(key, cb)
-    })
-  }
-
-  saveSource (key, cb) {
-    this.addSource(key, err => {
-      if (err) return cb(err)
-      this._writeSource(key, cb)
-    })
-  }
-
-  writer (cb) {
-    const self = this
-    if (this._localWriter) return cb(null, this._localWriter)
-    let release = null
-    this.ready(err => {
-      if (err) return cb(err)
-      if (this.primaryDrive.writable) {
-        finish(null, this.primaryDrive)
-      } else {
-        readKey()
-        // self.writerLock(_release => {
-        //   release = _release
-        //   readKey()
-        // })
-      }
-    })
-
-    function readKey () {
-      // console.log('rk')
-      if (self._localWriter) finish(null, self._localWriter)
-      let keystore = self.storage()('localwriter')
-      keystore.read(0, 32, (err, key) => {
-        if (err && err.code !== 'ENOENT') return finish(err)
-        if (key) makeWriter({ publicKey: key })
-        else {
-          const keyPair = crypto.keyPair()
-          keystore.write(0, keyPair.publicKey, err => {
-            if (err) return cb(err)
-            makeWriter(keyPair)
-          })
-        }
-      })
-    }
-
-    function makeWriter (keyPair) {
-      const { publicKey, secretKey } = keyPair
-      self._addSource(publicKey, { secretKey }, finish)
-    }
-
-    function finish (err, drive) {
-      self._localWriter = drive
-      if (release) release()
-      cb(err, drive)
-    }
-  }
-
-  replicate (opts) {
-    if (!opts) opts = {}
-
-    const stream = this.primaryDrive.replicate(opts)
-
-    for (let [key, drive] of this.sources.entries()) {
-      if (drive === this.primaryDrive) continue 
-      if (stream.destroyed) continue
-      drive.replicate({
-        live: opts.live,
-        download: opts.download,
-        upload: opts.upload,
-        stream: stream
-      })
-    }
-
-    this.on('source', drive => {
-      console.log('ADD TO REPL')
-      drive.replicate({
-        live: opts.live,
-        download: opts.download,
-        upload: opts.upload,
-        stream: stream
-      })
-    })
-
-    return stream
-  }
+function validateSchemaName (schema) {
+  return schema.split('/').length === 2
 }
 
 function hex (key) {
   return Buffer.isBuffer(key) ? key.toString('hex') : key
-}
-
-function noop () {}
-
-function nestStorage (storage, prefix) {
-  prefix = prefix || ''
-  return function (name, opts) {
-    let path = p.join(prefix, name)
-    if (typeof storage === 'string') return raf(p.join(storage, path))
-    return storage(path, opts)
-  }
 }

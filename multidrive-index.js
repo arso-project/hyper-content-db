@@ -2,12 +2,16 @@ const { State } = require('./lib/messages')
 const hypertrieIndex = require('hypertrie-index')
 const thunky = require('thunky')
 const { Stat } = require('hyperdrive/lib/messages')
+const inspect = require('inspect-custom-symbol')
+const { EventEmitter } = require('events')
 
 module.exports = (...args) => new MultidriveIndex(...args)
 
-class MultidriveIndex {
+class MultidriveIndex extends EventEmitter {
   constructor (opts) {
+    super()
     this.multidrive = opts.multidrive
+    this._opts = opts
     this._map = opts.map
     this._readFile = opts.readFile
 
@@ -45,24 +49,28 @@ class MultidriveIndex {
   }
 
   source (drive) {
-    console.log('new source', drive.key.toString('hex').substring(0, 5))
     const self = this
     const opts = {
       map,
+      prefix: this._opts.prefix,
       storeState: (state, cb) => this._storeDriveState(drive.key, state, cb),
       fetchState: (cb) => this._fetchDriveState(drive.key, cb)
     }
+
     const index = hypertrieIndex(drive._db, opts)
     this._indexes.set(drive.key, index)
-    // const index = hypertrieIndex(drive, opts)
+
+    index.on('ready', () => this.emit('indexed', drive.key))
+    index.on('ready', () => console.log('READY'))
+
     function map (msgs, done) {
-      console.log('MAP on', drive.key.toString('hex').substring(0, 5))
       collect(msgs, finish, (msg, next) => {
         msg = hypertrieIndex.transformNode(msg, Stat)
-        msg.driveKey = drive.key
+        msg.source = drive.key
+        overrideInspect(msg)
         if (self._readFile) {
-          const checkout = drive.checkout(msg.seq)
-          checkout.readFile(msg.key, (err, data) => {
+          // const checkout = drive.checkout(msg.seq)
+          drive.readFile(msg.key, (err, data) => {
             if (err) next(err, msg)
             msg.fileContent = data
             next(null, msg)
@@ -123,4 +131,14 @@ function collect (msgs, done, fn) {
       if (--missing === 0) done(errors.length ? errors : null, nextMsgs)
     })
   })
+}
+
+function overrideInspect (msg) {
+  const keys = ['seq', 'key', 'value', 'source', 'fileContent']
+  msg[inspect] = function (depth, opts) {
+    return keys.reduce((agg, key) => {
+      agg[key] = msg[key]
+      return agg
+    }, {})
+  }
 }

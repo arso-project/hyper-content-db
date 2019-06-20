@@ -25,6 +25,7 @@ Kappa.prototype.use = function (name, version, view) {
   }
   var idx = indexer({
     multidrive: this._multidrive,
+    prefix: view.prefix,
     // version: version,
     // maxBatch: view.maxBatch || 10,
     // batch: view.map,
@@ -33,6 +34,10 @@ Kappa.prototype.use = function (name, version, view) {
     fetchState: view.fetchState,
     storeState: view.storeState
   })
+
+  // TODO: Rethink event names.
+  idx.on('indexed', (driveKey) => this.emit('indexed', driveKey))
+
   // idx.on('error', function (err) {
   //   self.emit('error', err)
   // })

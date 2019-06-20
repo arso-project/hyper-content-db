@@ -4,7 +4,6 @@ const pump = require('pump')
 const log1 = require('debug')('core1')
 const log2 = require('debug')('core2')
 
-
 function contentview (name, opts) {
   const log = (opts && opts.log) || require('debug')('contentview.' + name)
   const contentview = {
