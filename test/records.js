@@ -66,6 +66,37 @@ tape('records', t => {
   })
 })
 
+tape.only('batch', t => {
+  const store1 = cstore(ram)
+  const schema = 'foo/bar'
+  const records = [
+    { op: 'put', id: cstore.id(), schema, record: { title: 'hello' } },
+    { op: 'put', id: cstore.id(), schema, record: { title: 'world' } },
+    { op: 'put', id: cstore.id(), schema, record: { title: 'moon' } }
+  ]
+  store1.batch(records, (err, ids) => {
+    t.error(err)
+    t.equal(ids.length, 3)
+    store1.listRecords(schema, (err, ids) => {
+      t.error(err)
+      t.equal(ids.length, 3)
+      let data = []
+      ids.forEach(id => store1.getRecords(schema, id, collect))
+      function collect (err, records) {
+        data = [...data, ...records]
+        if (data.length === ids.length) finish(data)
+      }
+    })
+  })
+
+  function finish (data) {
+    const results = data.map(d => d.value.title).sort()
+    const sources = records.map(r => r.record.title).sort()
+    t.deepEqual(results, sources, 'results match')
+    t.end()
+  }
+})
+
 function replicate (a, b, cb) {
   var stream = a.replicate()
   stream.pipe(b.replicate()).pipe(stream).on('end', cb)

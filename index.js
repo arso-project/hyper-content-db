@@ -17,6 +17,14 @@ class Contentcore extends EventEmitter {
     this.multidrive = multidrive(storage, key, opts)
     this.kcore = kappa({ multidrive: this.multidrive })
     this.ready = thunky(this._ready.bind(this))
+
+    // this.kcore.use('entities', {
+    //   prefix: '.data',
+    //   map (msgs, next) {
+    //     // console.log('MAP', msgs.map(m => ({...m})))
+    //     console.log('MAP', msgs)
+    //   }
+    // })
   }
 
   _ready (cb) {
@@ -45,6 +53,25 @@ class Contentcore extends EventEmitter {
 
   sources (cb) {
     this.multidrive.sources(cb)
+  }
+
+  batch (msgs, cb) {
+    const results = []
+    const errors = []
+    let missing = 0
+
+    msgs.forEach(msg => {
+      missing++
+      if (msg.op === 'put') this.putRecord(msg.schema, msg.id, msg.record, finish)
+      // if (msg.op === 'del') this.putRecord(msg.schema, msg.id, msg.record, finish)
+      else finish()
+    })
+
+    function finish (err, result) {
+      if (err) errors.push(err)
+      if (result) results.push(result)
+      if (--missing === 0) cb(errors.length && errors, results)
+    }
   }
 
   putRecord (schema, id, record, cb) {
