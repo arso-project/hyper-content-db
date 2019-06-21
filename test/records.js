@@ -16,6 +16,9 @@ tape('prefix', t => {
   })
   store1.kcore.on('indexed', () => {
     t.equal(results.length, 1, 'one result')
+    // TODO: The test failes here with "end called twice"
+    // - the event is once emitted at the beginning and once
+    // at the end.
     t.end()
   })
   store1.ready(() => {
@@ -66,7 +69,7 @@ tape('records', t => {
   })
 })
 
-tape.only('batch', t => {
+tape('batch', t => {
   const store1 = cstore(ram)
   const schema = 'foo/bar'
   const records = [

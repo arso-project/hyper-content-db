@@ -61,7 +61,6 @@ class MultidriveIndex extends EventEmitter {
     this._indexes.set(drive.key, index)
 
     index.on('ready', () => this.emit('indexed', drive.key))
-    index.on('ready', () => console.log('READY'))
 
     function map (msgs, done) {
       collect(msgs, finish, (msg, next) => {

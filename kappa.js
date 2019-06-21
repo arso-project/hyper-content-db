@@ -9,7 +9,7 @@ function Kappa (opts) {
   if (!(this instanceof Kappa)) return new Kappa(opts)
   if (!opts) opts = {}
 
-  this._multidrive = opts.multidrive
+  this._logs = opts.multidrive
   this._indexes = {}
 
   this.api = {}
@@ -24,7 +24,7 @@ Kappa.prototype.use = function (name, version, view) {
     version = undefined
   }
   var idx = indexer({
-    multidrive: this._multidrive,
+    multidrive: this._logs,
     prefix: view.prefix,
     // version: version,
     // maxBatch: view.maxBatch || 10,
@@ -120,16 +120,16 @@ Kappa.prototype.ready = function (viewNames, cb) {
 //   })
 // }
 
-// Kappa.prototype.writer = function (name, cb) {
-//   this._logs.writer(name, cb)
-// }
+Kappa.prototype.writer = function (name, cb) {
+  this._logs.writer(name, cb)
+}
 
 // Kappa.prototype.feed = function (key) {
 //   return this._logs.feed(key)
 // }
 
-// Kappa.prototype.replicate = function (opts) {
-//   return this._logs.replicate(opts)
-// }
+Kappa.prototype.replicate = function (opts) {
+  return this._logs.replicate(opts)
+}
 
 function noop () {}

@@ -2,22 +2,142 @@ const thunky = require('thunky')
 const p = require('path')
 const { EventEmitter } = require('events')
 const hyperid = require('hyperid')
+const memdb = require('memdb')
+const sub = require('subleveldown')
+const makeView = require('kappa-view')
 
 const multidrive = require('./multidrive')
 const kappa = require('./kappa')
 
 const P_DATA = '.data'
+const END = '\uffff'
 
 module.exports = (...args) => new Contentcore(...args)
 module.exports.id = () => Contentcore.id()
 
+function contentView (ldb, opts) {
+  const view = makeView(ldb, (db) => {
+    return {
+      prefix: '.data',
+      transformNodes: true,
+      readFile: true,
+      map (msgs, next) {
+        let ops = []
+        let missing = msgs.length
+        msgs = msgs.map(msg => {
+          const id = msg.keySplit.pop().replace(/\.json$/, '')
+          const schema = msg.keySplit.slice(1).join('/')
+          msg = {
+            id,
+            schema,
+            delete: msg.delete,
+            stat: msg.value,
+            value: msg.fileContent,
+            source: msg.source.toString('hex'),
+            seq: msg.seq
+          }
+
+          opts.map(msg, finish)
+          // let res = opts.map(msg)
+        })
+
+        function finish (res) {
+          if (res && Array.isArray(res)) {
+            ops.push.apply(ops, res)
+          } else if (typeof res === 'object') {
+            ops.push(res)
+          }
+          if (--missing === 0) {
+            console.log('finish', ops)
+            ldb.batch(ops, err => {
+              // TODO: This error went through silently!!
+              console.log('BATCH written', err)
+              next(err)
+            })
+          }
+        }
+      },
+      api: opts.api
+    }
+  })
+  return view
+}
+
+function entityView (db) {
+  return {
+    map (msg, next) {
+      const { id, schema, seq, source } = msg
+      let value = `${source}@${seq}`
+      let rows = [
+        [`is|${id}|${schema}`, value],
+        [`si|${schema}|${id}`, value]
+      ]
+      next(rows.map(r => ({ type: 'put', key: r[0], value: r[1] })))
+    },
+    api: {
+      all (kcore, cb) {
+        let ids = {}
+        let rs = db.createReadStream({
+          gt: 'is|',
+          lt: 'is|' + END
+        })
+        rs.on('data', row => {
+          let [id, schema] = row.key.split('|').slice(1)
+          let [source, seq] = row.value.split('@')
+          ids[id] = ids[id] || []
+          ids[id].push({ schema, source, seq })
+        })
+        rs.on('end', () => cb(null, ids))
+      },
+      allWithSchema (kcore, schema, cb) {
+        let ids = {}
+        let rs = db.createReadStream({
+          gt: `si|${schema}|`,
+          lt: `si|${schema}|` + END
+        })
+        rs.on('data', row => {
+          let id = row.key.split('|').pop()
+          let [source, seq] = row.value.split('@')
+          ids[id] = ids[id] || []
+          ids[id].push({ schema, source, seq })
+        })
+        rs.on('end', () => cb(null, ids))
+      }
+    }
+  }
+}
+
 class Contentcore extends EventEmitter {
   constructor (storage, key, opts) {
     super()
+    opts = opts || {}
     this.multidrive = multidrive(storage, key, opts)
     this.kcore = kappa({ multidrive: this.multidrive })
     this.ready = thunky(this._ready.bind(this))
 
+    this.level = opts.level || memdb()
+
+    this.api = {}
+
+    this.kcore.on('indexed', (...args) => this.emit('indexed', ...args))
+
+    this.useLevelView('entities', entityView)
+
+    // this.dbs = {}
+    // this.dbs.entities = sub(this.level, 'e')
+    // const view = contentView(this.dbs.entities, {
+    //   map (msg) {
+    //     const { id, schema, seq, source } = msg
+    //     let value = `${source}@${seq}`
+    //     return [
+    //       [`is!${id}!${schema}`, value],
+    //       [`si!${schema}!${id}`, value]
+    //     ]
+    //   },
+    //   // api: {
+    //   //   allIds
+    //   // }
+    // })
     // this.kcore.use('entities', {
     //   prefix: '.data',
     //   map (msgs, next) {
@@ -25,6 +145,14 @@ class Contentcore extends EventEmitter {
     //     console.log('MAP', msgs)
     //   }
     // })
+  }
+
+  useLevelView (name, makeInnerView) {
+    const db = sub(this.level, 'view.' + name)
+    const innerView = makeInnerView(db)
+    const view = contentView(db, innerView)
+    this.kcore.use(name, view)
+    this.api[name] = this.kcore.api[name]
   }
 
   _ready (cb) {
