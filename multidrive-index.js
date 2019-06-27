@@ -40,15 +40,19 @@ class MultidriveIndex extends EventEmitter {
 
     this.ready = thunky(this._ready.bind(this))
     this.multidrive.on('source', this.source.bind(this))
+    this.ready()
   }
 
   _ready (cb) {
     this.multidrive.ready(() => {
-      this.multidrive.sources.forEach(source => this.source(source))
+      this.multidrive.sources(sources => {
+        sources.forEach(source => this.source(source))
+      })
     })
   }
 
   source (drive) {
+    if (this._indexes.has(drive.key)) return
     const self = this
     const opts = {
       map,
@@ -60,7 +64,11 @@ class MultidriveIndex extends EventEmitter {
     const index = hypertrieIndex(drive._db, opts)
     this._indexes.set(drive.key, index)
 
-    index.on('ready', () => this.emit('indexed', drive.key))
+    index.on('indexed', (nodes) => {
+      if (nodes && nodes.length) {
+        this.emit('indexed', drive.key, nodes)
+      }
+    })
 
     function map (msgs, done) {
       collect(msgs, finish, (msg, next) => {
@@ -80,7 +88,8 @@ class MultidriveIndex extends EventEmitter {
       })
 
       function finish (err, msgs) {
-        // todo: handle err
+        // todo: handle err better?
+        if (err) self.emit('error', err)
         self._map(msgs, done)
       }
     }

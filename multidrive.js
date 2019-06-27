@@ -8,7 +8,7 @@ const p = require('path')
 
 module.exports = (...args) => new Multidrive(...args)
 
-const P_SOURCES = '.sources'
+const { P_SOURCES } = require('./constants')
 
 class Multidrive extends EventEmitter {
   constructor (storage, key, opts) {
@@ -75,6 +75,10 @@ class Multidrive extends EventEmitter {
     })
   }
 
+  hasSource (key) {
+    return this._sources.has(hex(key))
+  }
+
   saveSource (key, cb) {
     this.addSource(key, err => {
       if (err) return cb(err)
@@ -82,9 +86,16 @@ class Multidrive extends EventEmitter {
     })
   }
 
-  sources (cb) {
+  sources (fn) {
     this.ready(() => {
-      cb(null, [...this._sources.values()])
+      fn([...this._sources.values()])
+    })
+  }
+
+  source (key, cb) {
+    this.ready(() => {
+      if (this._sources.has(hex(key))) return cb(this._sources.get(key))
+      else cb()
     })
   }
 

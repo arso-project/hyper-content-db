@@ -12,22 +12,20 @@ tape('prefix', t => {
     map (msgs, next) {
       results = [...results, ...msgs]
       next()
+    },
+    indexed () {
+      t.equal(results.length, 1, 'one result')
+      t.end()
     }
   })
-  store1.kcore.on('indexed', () => {
-    t.equal(results.length, 1, 'one result')
-    // TODO: The test failes here with "end called twice"
-    // - the event is once emitted at the beginning and once
-    // at the end.
-    t.end()
-  })
+
   store1.ready(() => {
     store1.writer((err, drive) => {
-      t.error(err)
+      t.error(err, 'noerr writer')
       drive.writeFile('foo', 'bar', (err) => {
-        t.error(err)
+        t.error(err, 'noerr writeFile')
         store1.putRecord(schema, cstore.id(), record1, (err, id) => {
-          t.error(err)
+          t.error(err, 'noerr putRecord')
         })
       })
     })

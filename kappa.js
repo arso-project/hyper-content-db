@@ -18,7 +18,6 @@ function Kappa (opts) {
 inherits(Kappa, EventEmitter)
 
 Kappa.prototype.use = function (name, version, view) {
-  var self = this
   if (typeof version !== 'number') {
     view = version
     version = undefined
@@ -36,7 +35,10 @@ Kappa.prototype.use = function (name, version, view) {
   })
 
   // TODO: Rethink event names.
-  idx.on('indexed', (driveKey) => this.emit('indexed', driveKey))
+  idx.on('indexed', (driveKey, batch) => {
+    this.emit('indexed', driveKey)
+    if (view.indexed) view.indexed(batch)
+  })
 
   // idx.on('error', function (err) {
   //   self.emit('error', err)

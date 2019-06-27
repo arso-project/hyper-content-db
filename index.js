@@ -4,108 +4,17 @@ const { EventEmitter } = require('events')
 const hyperid = require('hyperid')
 const memdb = require('memdb')
 const sub = require('subleveldown')
-const makeView = require('kappa-view')
 
 const multidrive = require('./multidrive')
 const kappa = require('./kappa')
 
-const P_DATA = '.data'
-const END = '\uffff'
+const entitiesView = require('./views/entities')
+const contentView = require('./views/content')
+
+const { P_DATA, P_SCHEMA } = require('./constants')
 
 module.exports = (...args) => new Contentcore(...args)
 module.exports.id = () => Contentcore.id()
-
-function contentView (ldb, opts) {
-  const view = makeView(ldb, (db) => {
-    return {
-      prefix: '.data',
-      transformNodes: true,
-      readFile: true,
-      map (msgs, next) {
-        let ops = []
-        let missing = msgs.length
-        msgs = msgs.map(msg => {
-          const id = msg.keySplit.pop().replace(/\.json$/, '')
-          const schema = msg.keySplit.slice(1).join('/')
-          msg = {
-            id,
-            schema,
-            delete: msg.delete,
-            stat: msg.value,
-            value: msg.fileContent,
-            source: msg.source.toString('hex'),
-            seq: msg.seq
-          }
-
-          opts.map(msg, finish)
-          // let res = opts.map(msg)
-        })
-
-        function finish (res) {
-          if (res && Array.isArray(res)) {
-            ops.push.apply(ops, res)
-          } else if (typeof res === 'object') {
-            ops.push(res)
-          }
-          if (--missing === 0) {
-            console.log('finish', ops)
-            ldb.batch(ops, err => {
-              // TODO: This error went through silently!!
-              console.log('BATCH written', err)
-              next(err)
-            })
-          }
-        }
-      },
-      api: opts.api
-    }
-  })
-  return view
-}
-
-function entityView (db) {
-  return {
-    map (msg, next) {
-      const { id, schema, seq, source } = msg
-      let value = `${source}@${seq}`
-      let rows = [
-        [`is|${id}|${schema}`, value],
-        [`si|${schema}|${id}`, value]
-      ]
-      next(rows.map(r => ({ type: 'put', key: r[0], value: r[1] })))
-    },
-    api: {
-      all (kcore, cb) {
-        let ids = {}
-        let rs = db.createReadStream({
-          gt: 'is|',
-          lt: 'is|' + END
-        })
-        rs.on('data', row => {
-          let [id, schema] = row.key.split('|').slice(1)
-          let [source, seq] = row.value.split('@')
-          ids[id] = ids[id] || []
-          ids[id].push({ schema, source, seq })
-        })
-        rs.on('end', () => cb(null, ids))
-      },
-      allWithSchema (kcore, schema, cb) {
-        let ids = {}
-        let rs = db.createReadStream({
-          gt: `si|${schema}|`,
-          lt: `si|${schema}|` + END
-        })
-        rs.on('data', row => {
-          let id = row.key.split('|').pop()
-          let [source, seq] = row.value.split('@')
-          ids[id] = ids[id] || []
-          ids[id].push({ schema, source, seq })
-        })
-        rs.on('end', () => cb(null, ids))
-      }
-    }
-  }
-}
 
 class Contentcore extends EventEmitter {
   constructor (storage, key, opts) {
@@ -121,35 +30,12 @@ class Contentcore extends EventEmitter {
 
     this.kcore.on('indexed', (...args) => this.emit('indexed', ...args))
 
-    this.useLevelView('entities', entityView)
-
-    // this.dbs = {}
-    // this.dbs.entities = sub(this.level, 'e')
-    // const view = contentView(this.dbs.entities, {
-    //   map (msg) {
-    //     const { id, schema, seq, source } = msg
-    //     let value = `${source}@${seq}`
-    //     return [
-    //       [`is!${id}!${schema}`, value],
-    //       [`si!${schema}!${id}`, value]
-    //     ]
-    //   },
-    //   // api: {
-    //   //   allIds
-    //   // }
-    // })
-    // this.kcore.use('entities', {
-    //   prefix: '.data',
-    //   map (msgs, next) {
-    //     // console.log('MAP', msgs.map(m => ({...m})))
-    //     console.log('MAP', msgs)
-    //   }
-    // })
+    this.useLevelView('entities', entitiesView)
   }
 
   useLevelView (name, makeInnerView) {
     const db = sub(this.level, 'view.' + name)
-    const innerView = makeInnerView(db)
+    const innerView = makeInnerView(db, this)
     const view = contentView(db, innerView)
     this.kcore.use(name, view)
     this.api[name] = this.kcore.api[name]
@@ -179,8 +65,16 @@ class Contentcore extends EventEmitter {
     this.multidrive.addSource(key, cb)
   }
 
+  hasSource (key) {
+    return this.multidrive.hasSource(key)
+  }
+
   sources (cb) {
     this.multidrive.sources(cb)
+  }
+
+  source (key, cb) {
+    this.multidrive.source(key, cb)
   }
 
   batch (msgs, cb) {
@@ -192,7 +86,9 @@ class Contentcore extends EventEmitter {
       missing++
       if (msg.op === 'put') this.putRecord(msg.schema, msg.id, msg.record, finish)
       // if (msg.op === 'del') this.putRecord(msg.schema, msg.id, msg.record, finish)
-      else finish()
+      // NOTE: Without process.nextTick this would break because missing would not fully
+      // increase before finishing.
+      else process.nextTick(finish)
     })
 
     function finish (err, result) {
@@ -204,7 +100,7 @@ class Contentcore extends EventEmitter {
 
   putRecord (schema, id, record, cb) {
     // Schema names have to have exactly one slash.
-    if (!validateSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
+    if (!validSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
 
     this.writer((err, drive) => {
       if (err) return cb(err)
@@ -218,12 +114,11 @@ class Contentcore extends EventEmitter {
   }
 
   getRecords (schema, id, cb) {
-    if (!validateSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
+    if (!validSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
     const records = []
     const errors = []
     let missing = 0
-    this.sources((err, drives) => {
-      if (err) return cb(err)
+    this.sources(drives => {
       drives.forEach(drive => {
         missing++
         const path = makePath(schema, id)
@@ -259,8 +154,7 @@ class Contentcore extends EventEmitter {
   listRecords (schema, cb) {
     let ids = []
     let missing = 0
-    this.sources((err, drives) => {
-      if (err) return cb(err)
+    this.sources(drives => {
       drives.forEach(drive => {
         let path = p.join(P_DATA, schema)
         missing++
@@ -280,6 +174,122 @@ class Contentcore extends EventEmitter {
       if (--missing === 0) cb(null, list)
     }
   }
+
+  expandSchemaName (name, cb) {
+    if (!validSchemaName(name)) return cb(new InvalidSchemaName(name))
+    if (name.startsWith('~/')) {
+      this.writer((err, drive) => {
+        if (err) return cb(err)
+        let expanded = hex(drive.key) + name.substring(1)
+        cb(null, expanded)
+      })
+    }
+  }
+
+  putSchema (name, schema, cb) {
+    this.expandSchemaName(name, (err, name) => {
+      if (err) return cb(err)
+      const path = p.join(P_SCHEMA, name + '.json')
+      const buf = Buffer.from(JSON.stringify(this._encodeSchema(schema, name)))
+      this.writer((err, drive) => {
+        if (err) return cb(err)
+        drive.writeFile(path, buf, cb)
+      })
+    })
+  }
+
+  _encodeSchema (schema, name) {
+    const defaults = {
+      '$schema': 'http://json-schema.org/draft-07/schema#',
+      '$id': `dat://${name}.json`,
+      type: 'object'
+    }
+    return Object.assign({}, defaults, schema)
+  }
+
+  getSchema (name, opts, cb) {
+    if (typeof opts === 'function') return this.getSchema(name, {}, opts)
+    opts = opts || {}
+    const self = this
+
+    let missing = 0
+    let candidates = []
+
+    this.expandSchemaName(name, (err, name) => {
+      if (err) return cb(err)
+      const ns = name.split('/').shift()
+      const path = p.join(P_SCHEMA, name + '.json')
+
+      if (ns === '~') getLocal(path, finish)
+      else if (this.hasSource(ns)) getFrom(ns, path, finish)
+      else getAll(path, finish)
+    })
+
+    function get (drive, path, cb) {
+      drive.readFile(path, (err, buf) => {
+        if (!err && buf.length) {
+          try {
+            const schema = JSON.parse(buf.toString())
+            cb(null, schema)
+          } catch (e) { cb(e) }
+        } else cb()
+      })
+    }
+
+    function getLocal (path, cb) {
+      missing = 1
+      self.writer((err, drive) => {
+        if (err) return cb(err)
+        get(drive, path, cb)
+      })
+    }
+
+    function getFrom (source, path, cb) {
+      missing = 1
+      self.source(source, drive => {
+        if (!drive) return cb()
+        get(drive, path, cb)
+      })
+    }
+
+    function getAll (path, cb) {
+      self.sources(drives => {
+        missing = drives.length
+        drives.forEach(drive => get(drive, path, cb))
+      })
+    }
+
+    function finish (err, schema) {
+      // TODO: This should be emitted once only.
+      if (err) return cb(err)
+      if (schema) candidates.push(schema)
+      if (--missing === 0) {
+        if (!candidates.length) return cb()
+        if (candidates.length === 1) return cb(null, candidates[0])
+        else return cb(null, reduce(candidates))
+      }
+    }
+
+    function reduce (schemas) {
+      if (opts.reduce) return opts.reduce(schemas)
+
+      let winner
+      for (let schema of schemas) {
+        winner = winner || schema
+        if (schema.version && schema.version > winner.version) {
+          winner = schema
+        }
+      }
+      return winner
+    }
+  }
+}
+
+class InvalidSchemaName extends Error {
+  constructor (name) {
+    super()
+    this.message = `Invalid schema name: ${name}`
+  }
 }
 
 Contentcore.id = hyperid({ fixedLength: true, urlSafe: true })
@@ -288,7 +298,7 @@ function makePath (schema, id) {
   return p.join(P_DATA, schema, id + '.json')
 }
 
-function validateSchemaName (schema) {
+function validSchemaName (schema) {
   return schema.split('/').length === 2
 }
 
