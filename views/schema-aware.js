@@ -1,11 +1,6 @@
-const thunky = require('thunky')
 const { Transform } = require('stream')
 
 const { CHAR_END, CHAR_SPLIT, CHAR_START } = require('../constants')
-
-const END = '\uffff'
-const SPLIT = '\u0000'
-const START = '\u0001'
 
 module.exports = schemaView
 

@@ -212,7 +212,7 @@ class Contentcore extends EventEmitter {
     opts = opts || {}
     const self = this
 
-    let missing = 0
+    let missing = 1
     let candidates = []
 
     this.expandSchemaName(name, (err, name) => {
@@ -220,8 +220,7 @@ class Contentcore extends EventEmitter {
       const ns = name.split('/').shift()
       const path = p.join(P_SCHEMA, name + '.json')
 
-      if (ns === '~') getLocal(path, finish)
-      else if (this.hasSource(ns)) getFrom(ns, path, finish)
+      if (this.hasSource(ns)) getFrom(ns, path, finish)
       else getAll(path, finish)
     })
 
@@ -236,16 +235,7 @@ class Contentcore extends EventEmitter {
       })
     }
 
-    function getLocal (path, cb) {
-      missing = 1
-      self.writer((err, drive) => {
-        if (err) return cb(err)
-        get(drive, path, cb)
-      })
-    }
-
     function getFrom (source, path, cb) {
-      missing = 1
       self.source(source, drive => {
         if (!drive) return cb()
         get(drive, path, cb)
