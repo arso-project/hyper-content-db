@@ -13,9 +13,14 @@ const { P_SOURCES } = require('./constants')
 class Multidrive extends EventEmitter {
   constructor (storage, key, opts) {
     super()
+    opts = opts || {}
+    this._opts = opts
+
     this.storage = name => nestStorage(storage, name)
 
-    this.primaryDrive = hyperdrive(this.storage('primary'), key)
+    this.primaryDrive = hyperdrive(this.storage('primary'), key, {
+      sparse: opts.sparse
+    })
 
     this.ready = thunky(this._ready.bind(this))
 
@@ -58,12 +63,17 @@ class Multidrive extends EventEmitter {
   _addSource (key, opts, cb) {
     // console.log('as', key, opts, cb)
     if (typeof opts === 'function') return this._addSource(key, null, opts)
+
+    opts = opts || {}
+    opts.sparse = opts.sparse || this._opts.sparse
+
     const drive = hyperdrive(this.storage(hex(key)), key, opts)
     this._pushSource(drive, cb)
   }
 
   _writeSource (key, cb) {
-    this.writer(drive => {
+    this.writer((err, drive) => {
+      if (err) return cb(err)
       drive.writeFile(p.join(P_SOURCES, hex(key)), Buffer.alloc(0), cb)
     })
   }
@@ -191,6 +201,7 @@ function nestStorage (storage, prefix) {
   prefix = prefix || ''
   return function (name, opts) {
     let path = p.join(prefix, name)
+    // console.log('STORAGE', path, storage)
     if (typeof storage === 'string') return raf(p.join(storage, path))
     return storage(path, opts)
   }

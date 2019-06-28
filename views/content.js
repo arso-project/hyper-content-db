@@ -32,9 +32,15 @@ function contentView (ldb, opts) {
             seq: msg.seq
           }
 
-          opts.map(msg, finish)
+          if (!opts.batch) opts.map(msg, finish)
+          return msg
           // let res = opts.map(msg)
         })
+
+        if (opts.batch) {
+          missing = 1
+          opts.map(msgs, finish)
+        }
 
         function finish (res) {
           if (res && Array.isArray(res)) {

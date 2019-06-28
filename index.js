@@ -54,7 +54,14 @@ class Contentcore extends EventEmitter {
   }
 
   writer (cb) {
-    this.multidrive.writer(cb)
+    this.ready(err => {
+      if (err) return cb(err)
+      this.multidrive.writer(cb)
+    })
+  }
+
+  writeFile (path, buf, opts, cb) {
+    this.writer((err, drive) => err ? cb(err) : drive.writeFile(path, buf, opts, cb))
   }
 
   replicate (opts) {
@@ -100,79 +107,86 @@ class Contentcore extends EventEmitter {
 
   putRecord (schema, id, record, cb) {
     // Schema names have to have exactly one slash.
-    if (!validSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
-
-    this.writer((err, drive) => {
+    this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
-      const path = makePath(schema, id)
-      const buf = Buffer.from(JSON.stringify(record))
-      drive.writeFile(path, buf, (err) => {
+      this.writer((err, drive) => {
         if (err) return cb(err)
-        cb(null, id)
+        const path = makePath(schema, id)
+        const buf = Buffer.from(JSON.stringify(record))
+        drive.writeFile(path, buf, (err) => {
+          if (err) return cb(err)
+          cb(null, id)
+        })
       })
     })
+
   }
 
   getRecords (schema, id, cb) {
-    if (!validSchemaName(schema)) return cb(new Error('Invalid schema name: ' + schema))
-    const records = []
-    const errors = []
-    let missing = 0
-    this.sources(drives => {
-      drives.forEach(drive => {
-        missing++
-        const path = makePath(schema, id)
-        const key = hex(drive.key)
-        const msg = { path, source: key, id, schema }
-        drive.stat(path, (err, stat) => {
-          if (err) return onrecord(null)
-          drive.readFile(path, (err, buf) => {
-            msg.stat = stat
-            if (err) return onrecord({ ...msg, error: err })
-            try {
-              const value = JSON.parse(buf.toString())
-              msg.value = value
-              onrecord(msg)
-            } catch (err) {
-              onrecord({ ...msg, error: err })
-            }
+    this.expandSchemaName(schema, (err, schema) => {
+      if (err) return cb(err)
+      const records = []
+      const errors = []
+      let missing = 0
+      this.sources(drives => {
+        drives.forEach(drive => {
+          missing++
+          const path = makePath(schema, id)
+          const key = hex(drive.key)
+          const msg = { path, source: key, id, schema }
+          drive.stat(path, (err, stat) => {
+            if (err) return onrecord(null)
+            drive.readFile(path, (err, buf) => {
+              msg.stat = stat
+              if (err) return onrecord({ ...msg, error: err })
+              try {
+                const value = JSON.parse(buf.toString())
+                msg.value = value
+                onrecord(msg)
+              } catch (err) {
+                onrecord({ ...msg, error: err })
+              }
+            })
           })
         })
       })
-    })
 
-    function onrecord (msg) {
-      if (msg && msg.error) errors.push(msg)
-      else if (msg) records.push(msg)
-      if (--missing === 0) {
-        let error = errors.length ? errors : null
-        cb(error, records)
+      function onrecord (msg) {
+        if (msg && msg.error) errors.push(msg)
+        else if (msg) records.push(msg)
+        if (--missing === 0) {
+          let error = errors.length ? errors : null
+          cb(error, records)
+        }
       }
-    }
+    })
   }
 
   listRecords (schema, cb) {
-    let ids = []
-    let missing = 0
-    this.sources(drives => {
-      drives.forEach(drive => {
-        let path = p.join(P_DATA, schema)
-        missing++
-        drive.readdir(path, (err, list) => {
-          if (err) return finish(err)
-          if (!list.length) return finish()
-          list = list.map(id => id.replace(/\.json$/, ''))
-          finish(null, list)
+    this.expandSchemaName(schema, (err, schema) => {
+      if (err) return cb(err)
+      let ids = []
+      let missing = 0
+      this.sources(drives => {
+        drives.forEach(drive => {
+          let path = p.join(P_DATA, schema)
+          missing++
+          drive.readdir(path, (err, list) => {
+            if (err) return finish(err)
+            if (!list.length) return finish()
+            list = list.map(id => id.replace(/\.json$/, ''))
+            finish(null, list)
+          })
         })
       })
-    })
 
-    function finish (err, list) {
-      if (!err && list) {
-        ids = [...ids, ...list]
+      function finish (err, list) {
+        if (!err && list) {
+          ids = [...ids, ...list]
+        }
+        if (--missing === 0) cb(null, list)
       }
-      if (--missing === 0) cb(null, list)
-    }
+    })
   }
 
   expandSchemaName (name, cb) {
