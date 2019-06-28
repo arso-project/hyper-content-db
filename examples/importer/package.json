@@ -1,0 +1,37 @@
+{
+		"name": "@archipel/importer",
+		"version": "1.0.0",
+		"description": "Importer example for content-store",
+		"main": "importer.js",
+		"scripts": {
+				"test": "echo \"Error: no test specified\" && exit 1"
+		},
+		"author": "",
+		"license": "GPL-3.0",
+		"dependencies": {
+				"freeze-dry": "github:Frando/freeze-dry#node-compat-dev",
+				"jsdom": "^11.11.0",
+				"ky": "^0.9.0",
+				"ky-universal": "^0.1.0",
+				"sonar": "github:Frando/sonar#master",
+				"metascraper": "^4.10.1",
+				"metascraper-author": "^4.10.1",
+				"metascraper-clearbit-logo": "^4.10.1",
+				"metascraper-date": "^4.10.1",
+				"metascraper-description": "^4.10.1",
+				"metascraper-image": "^4.10.1",
+				"metascraper-logo": "^4.10.1",
+				"metascraper-publisher": "^4.10.1",
+				"metascraper-title": "^4.10.1",
+				"metascraper-url": "^4.10.1",
+				"minimist": "^1.2.0",
+				"mirror-folder": "^3.0.0",
+				"mkdirp": "^0.5.1",
+				"pretty-bytes": "^5.2.0",
+				"readability-from-string": "^2.0.0",
+				"rehype-parse": "6.0.0",
+				"rehype-remark": "5.0.1",
+				"remark-stringify": "6.0.4",
+				"unified": "7.1.0"
+		}
+}
