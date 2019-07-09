@@ -1,7 +1,7 @@
 const { State } = require('./lib/messages')
 const hypertrieIndex = require('hypertrie-index')
 const thunky = require('thunky')
-const { Stat } = require('hyperdrive/lib/messages')
+const { messages: { Stat: StatEncoder } } = require('hyperdrive-schemas')
 const inspect = require('inspect-custom-symbol')
 const { EventEmitter } = require('events')
 
@@ -61,7 +61,7 @@ class MultidriveIndex extends EventEmitter {
       fetchState: (cb) => this._fetchDriveState(drive.key, cb)
     }
 
-    const index = hypertrieIndex(drive._db, opts)
+    const index = hypertrieIndex(drive._db._trie, opts)
     this._indexes.set(drive.key, index)
 
     index.on('indexed', (nodes) => {
@@ -72,7 +72,7 @@ class MultidriveIndex extends EventEmitter {
 
     function map (msgs, done) {
       collect(msgs, finish, (msg, next) => {
-        msg = hypertrieIndex.transformNode(msg, Stat)
+        msg = hypertrieIndex.transformNode(msg, StatEncoder)
         msg.source = drive.key
         overrideInspect(msg)
         if (self._readFile) {
@@ -97,6 +97,7 @@ class MultidriveIndex extends EventEmitter {
 
   _storeDriveState (key, state, cb) {
     this._states.set(key, state)
+    // console.log('STORE STATE', key, state)
     let buf = this._encodeStates()
     this._storeState(buf, cb)
   }
@@ -106,6 +107,7 @@ class MultidriveIndex extends EventEmitter {
       if (err) return cb(err)
       this._decodeStates(data)
       const state = this._states.get(key)
+      // console.log('FETCH STATE', key, state)
       cb(null, state)
     })
   }

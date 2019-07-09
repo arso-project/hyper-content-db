@@ -11,7 +11,7 @@ const kappa = require('./kappa')
 const entitiesView = require('./views/entities')
 const contentView = require('./views/content')
 
-const { P_DATA, P_SCHEMA } = require('./constants')
+const { P_DATA, P_SCHEMA, P_SOURCES } = require('./constants')
 
 module.exports = (...args) => new Contentcore(...args)
 module.exports.id = () => Contentcore.id()
@@ -49,6 +49,24 @@ class Contentcore extends EventEmitter {
     })
   }
 
+  _initWriter (cb) {
+    this.multidrive.writer((err, writer) => {
+      if (err) return cb(err)
+      // TODO: Don't do this on every start?
+      let dirs = [P_DATA, P_SCHEMA, P_SOURCES]
+      let pending = dirs.length
+      for (let dir of dirs) {
+        writer.mkdir(dir, done)
+      }
+      function done (err) {
+        if (err && err.code !== 'EEXIST') return cb(err)
+        if (--pending === 0) {
+          cb(null, writer)
+        }
+      }
+    })
+  }
+
   use (view, opts) {
     this.kcore.use(view, opts)
   }
@@ -56,7 +74,8 @@ class Contentcore extends EventEmitter {
   writer (cb) {
     this.ready(err => {
       if (err) return cb(err)
-      this.multidrive.writer(cb)
+      if (!this._writerReady) this._initWriter(cb)
+      else this.multidrive.writer(cb)
     })
   }
 
@@ -111,11 +130,16 @@ class Contentcore extends EventEmitter {
       if (err) return cb(err)
       this.writer((err, drive) => {
         if (err) return cb(err)
-        const path = makePath(schema, id)
-        const buf = Buffer.from(JSON.stringify(value))
-        drive.writeFile(path, buf, (err) => {
-          if (err) return cb(err)
-          cb(null, id)
+        const dir = p.join(P_DATA, schema)
+
+        drive.mkdir(dir, (err) => {
+          if (err && err.code !== 'EEXIST') return cb(err)
+          const path = makePath(schema, id)
+          const buf = Buffer.from(JSON.stringify(value))
+          drive.writeFile(path, buf, (err) => {
+            if (err) return cb(err)
+            cb(null, id)
+          })
         })
       })
     })
@@ -315,4 +339,23 @@ function validSchemaName (schema) {
 
 function hex (key) {
   return Buffer.isBuffer(key) ? key.toString('hex') : key
+}
+
+function mkdirp (fs, path, cb) {
+  const parts = path.split('/')
+  let pending = parts.length
+
+  // simple once fn
+  let error = err => {
+    cb(err)
+    error = () => {}
+  }
+
+  for (let i = 0; i < parts.length; i++) {
+    let path = p.join(parts.slice(0, i))
+    fs.mkdir(path, (err) => {
+      if (err && err !== 'EEXIST') error(err)
+      if (--pending === 0) cb()
+    })
+  }
 }

@@ -11,7 +11,8 @@
   "license": "GPL-3.0",
   "dependencies": {
     "hypercore-crypto": "^1.0.0",
-    "hyperdrive": "^10.0.0-rc2",
+    "hyperdrive": "github:mafintosh/hyperdrive#v10",
+    "hyperdrive-schemas": "^0.9.5",
     "hyperid": "^2.0.2",
     "hypertrie-index": "^0.1.0",
     "inspect-custom-symbol": "^1.1.0",
