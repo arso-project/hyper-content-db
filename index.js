@@ -60,10 +60,6 @@ class Contentcore extends EventEmitter {
     })
   }
 
-  writeFile (path, buf, opts, cb) {
-    this.writer((err, drive) => err ? cb(err) : drive.writeFile(path, buf, opts, cb))
-  }
-
   replicate (opts) {
     return this.multidrive.replicate(opts)
   }
@@ -91,8 +87,8 @@ class Contentcore extends EventEmitter {
 
     msgs.forEach(msg => {
       missing++
-      if (msg.op === 'put') this.putRecord(msg.schema, msg.id, msg.record, finish)
-      // if (msg.op === 'del') this.putRecord(msg.schema, msg.id, msg.record, finish)
+      if (msg.op === 'put') this.put(msg.schema, msg.id, msg.value, finish)
+      // if (msg.op === 'del') this.put(msg.schema, msg.id, msg.value, finish)
       // NOTE: Without process.nextTick this would break because missing would not fully
       // increase before finishing.
       else process.nextTick(finish)
@@ -105,14 +101,18 @@ class Contentcore extends EventEmitter {
     }
   }
 
-  putRecord (schema, id, record, cb) {
+  create (schema, value, cb) {
+    this.put(schema, this.id(), value, cb)
+  }
+
+  put (schema, id, value, cb) {
     // Schema names have to have exactly one slash.
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
       this.writer((err, drive) => {
         if (err) return cb(err)
         const path = makePath(schema, id)
-        const buf = Buffer.from(JSON.stringify(record))
+        const buf = Buffer.from(JSON.stringify(value))
         drive.writeFile(path, buf, (err) => {
           if (err) return cb(err)
           cb(null, id)
@@ -131,12 +131,13 @@ class Contentcore extends EventEmitter {
         drives.forEach(drive => {
           missing++
           const path = makePath(schema, id)
-          const key = hex(drive.key)
-          const msg = { path, source: key, id, schema }
+          const source = hex(drive.key)
+          const msg = { path, source, id, schema }
           drive.stat(path, (err, stat) => {
             if (err) return onrecord(null)
+            msg.stat = stat
+
             drive.readFile(path, (err, buf) => {
-              msg.stat = stat
               if (err) return onrecord({ ...msg, error: err })
               try {
                 const value = JSON.parse(buf.toString())
@@ -189,21 +190,25 @@ class Contentcore extends EventEmitter {
   }
 
   expandSchemaName (name, cb) {
-    if (!validSchemaName(name)) return cb(new InvalidSchemaName(name))
-    if (name.startsWith('~/')) {
-      this.writer((err, drive) => {
-        if (err) return cb(err)
-        let expanded = hex(drive.key) + name.substring(1)
+    this.ready(() => {
+      if (!validSchemaName(name)) return cb(new InvalidSchemaName(name))
+      if (name.indexOf('/') === -1) {
+        let expanded = hex(this.key) + '/' + name
         cb(null, expanded)
-      })
-    } else {
-      cb(null, name)
-    }
+        // this.writer((err, drive) => {
+        //   if (err) return cb(err)
+        //   let expanded = hex(drive.key) + '/' + name
+        //   cb(null, expanded)
+        // })
+      } else {
+        cb(null, name)
+      }
+    })
   }
 
   putSchema (name, schema, cb) {
     this.expandSchemaName(name, (err, name) => {
-      if (err) return cb(err)
+      if (err && cb) return cb(err)
       const path = p.join(P_SCHEMA, name + '.json')
       const buf = Buffer.from(JSON.stringify(this._encodeSchema(schema, name)))
       this.writer((err, drive) => {
@@ -304,7 +309,8 @@ function makePath (schema, id) {
 }
 
 function validSchemaName (schema) {
-  return schema.split('/').length === 2
+  return schema.match(/^[a-zA-Z0-9_\-./]*$/)
+  // return schema.split('/').length === 2
 }
 
 function hex (key) {

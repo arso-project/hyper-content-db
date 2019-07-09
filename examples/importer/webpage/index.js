@@ -294,8 +294,8 @@ function _saveRecords (job, next) {
     batch.push({
       op: 'put',
       id: job.id,
-      schema: '~/' + record.schema,
-      record: record.value
+      schema: record.schema,
+      value: record.value
     })
   })
   cstore.batch(batch, next)

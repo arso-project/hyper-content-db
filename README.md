@@ -55,4 +55,4 @@ And after using the exported transformNode function:
 
 ## index.js
 
-A document database abstraction. `putRecord(schema, id, value)`, `getRecord(schema, id)`, `use(view)`, `putSchema(name, schema)`, `getSchema(name)`, `addSource(key)`
+A document database abstraction. `put(schema, id, value)`, `getRecord(schema, id)`, `use(view)`, `putSchema(name, schema)`, `getSchema(name)`, `addSource(key)`

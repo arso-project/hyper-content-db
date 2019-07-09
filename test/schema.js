@@ -6,7 +6,7 @@ const view = require('../views/schema-aware.js')
 tape('schema view', t => {
   const store1 = cstore(ram)
 
-  const schema = '~/post'
+  const schema = 'post'
 
   store1.putSchema(schema, {
     properties: {
@@ -29,10 +29,10 @@ tape('schema view', t => {
     { title: 'old', date: '2018-07' },
     { title: 'future', date: '2020-01' }
   ]
-  let batch = rows.map(record => ({
+  let batch = rows.map(value => ({
     op: 'put',
     id: cstore.id(),
-    record,
+    value,
     schema
   }))
 

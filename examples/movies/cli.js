@@ -22,7 +22,7 @@ function run () {
 // TODO: Implement putSchema
 function init () {
   store.writer(writer => {
-    writer.putSchema('~/movies', {
+    writer.putSchema('movies', {
       label: 'Movies',
       properties: {
         title: {
@@ -56,7 +56,7 @@ function prepare (movies, cb) {
   const batchSize = 1000
   let pos = 0
   const batches = []
-  const schema = '@/movie'
+  const schema = 'movie'
 
   while (pos < movies.length) {
     let rows = movies.slice(pos, pos + batchSize)
@@ -64,7 +64,7 @@ function prepare (movies, cb) {
     let batch = rows.map(value => ({
       op: 'put',
       id: cstore.id(),
-      record: value,
+      value,
       schema
     }))
     batches.push(batch)

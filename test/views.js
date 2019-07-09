@@ -10,10 +10,10 @@ tape('entity view', t => {
   let ids = [cstore.id(), cstore.id(), cstore.id()]
 
   const records = [
-    { op: 'put', id: ids[0], schema, record: { title: 'hello' } },
-    { op: 'put', id: ids[1], schema, record: { title: 'hello' } },
-    { op: 'put', id: ids[1], schema: schema2, record: { link: 'foo' } },
-    { op: 'put', id: ids[2], schema, record: { title: 'moon' } }
+    { op: 'put', id: ids[0], schema, value: { title: 'hello' } },
+    { op: 'put', id: ids[1], schema, value: { title: 'hello' } },
+    { op: 'put', id: ids[1], schema: schema2, value: { link: 'foo' } },
+    { op: 'put', id: ids[2], schema, value: { title: 'moon' } }
   ]
 
   store1.batch(records, (err, ids) => {

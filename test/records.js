@@ -24,9 +24,9 @@ tape('prefix', t => {
       t.error(err, 'noerr writer')
       drive.writeFile('foo', 'bar', (err) => {
         t.error(err, 'noerr writeFile')
-        store1.putRecord(schema, cstore.id(), record1, (err, id) => {
+        store1.put(schema, cstore.id(), record1, (err, id) => {
           console.log('PUT DONE', err, id)
-          t.error(err, 'noerr putRecord')
+          t.error(err, 'noerr put')
         })
       })
     })
@@ -43,9 +43,9 @@ tape('records', t => {
   // This creates a record in each source with the same id.
   store1.ready(() => {
     const store2 = cstore(ram, store1.key)
-    store1.putRecord(schema, cstore.id(), record1, (err, id1) => {
+    store1.put(schema, cstore.id(), record1, (err, id1) => {
       t.error(err, 'no err')
-      store2.putRecord(schema, id1, record2, err => {
+      store2.put(schema, id1, record2, err => {
         t.error(err, 'no err')
         replicate(store1, store2, () => {
           store2.getRecords(schema, id1, (err, records) => {
@@ -72,9 +72,9 @@ tape('batch', t => {
   const store1 = cstore(ram)
   const schema = 'foo/bar'
   const records = [
-    { op: 'put', id: cstore.id(), schema, record: { title: 'hello' } },
-    { op: 'put', id: cstore.id(), schema, record: { title: 'world' } },
-    { op: 'put', id: cstore.id(), schema, record: { title: 'moon' } }
+    { op: 'put', id: cstore.id(), schema, value: { title: 'hello' } },
+    { op: 'put', id: cstore.id(), schema, value: { title: 'world' } },
+    { op: 'put', id: cstore.id(), schema, value: { title: 'moon' } }
   ]
   store1.batch(records, (err, ids) => {
     t.error(err)
@@ -85,6 +85,7 @@ tape('batch', t => {
       let data = []
       ids.forEach(id => store1.getRecords(schema, id, collect))
       function collect (err, records) {
+        if (err) t.error(err)
         data = [...data, ...records]
         if (data.length === ids.length) finish(data)
       }
@@ -93,7 +94,7 @@ tape('batch', t => {
 
   function finish (data) {
     const results = data.map(d => d.value.title).sort()
-    const sources = records.map(r => r.record.title).sort()
+    const sources = records.map(r => r.value.title).sort()
     t.deepEqual(results, sources, 'results match')
     t.end()
   }
