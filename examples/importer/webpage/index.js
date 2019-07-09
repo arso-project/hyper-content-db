@@ -7,6 +7,7 @@ const jsdom = require('jsdom')
 const blake2b = require('blake2b')
 const mkdirp = require('mkdirp')
 const htmlToMd = require('./html-to-markdown.js')
+const crypto = require('hypercore-crypto')
 // const got = require('got')
 //
 const debug = require('debug')('import')
@@ -113,6 +114,9 @@ class Importer {
           if (err) return error(err)
           this.executeNextStep(done)
         })
+        // if (typeof w === 'object' && w.then) {
+        //   w.catch(err => error(err)).then(() => this.executeNextStep(done))
+        // }
       } catch (err) {
         return error(err)
       }
@@ -157,8 +161,8 @@ class Importer {
     return this.resources[id]
   }
 
-  addFile (path, body) {
-    this.files[path] = body
+  addFile (path, value, metadata) {
+    this.files[path] = { value, metadata }
   }
 
   addDerivedFile (path, body) {
@@ -178,12 +182,27 @@ class Importer {
   }
 }
 
-function urlToFilename (url, prefix) {
+function urlToFilename (url, opts) {
+  opts = opts || {}
   let parsed = u.parse(url)
   let PREFIX = '/_import'
   // todo: how to handle GET params?
-  prefix = prefix || ''
-  let path = p.join(PREFIX, prefix, parsed.hostname, parsed.pathname)
+  let prefix = opts.prefix || ''
+  let pathname = parsed.pathname
+  if (opts.hash && pathname.length > 30) {
+    const ext = p.extname(pathname)
+    pathname = hash(pathname).toString('hex') + ext
+  }
+  let path = p.join(PREFIX, prefix, parsed.hostname, pathname)
+  return path
+}
+
+function blobToFilename (buf, url) {
+  let parsed = u.parse(url)
+  let PREFIX = '/_blobs'
+  let name = hash(buf).toString('hex')
+  let ext = p.extname(parsed.pathname)
+  let path = p.join(PREFIX, parsed.hostname, name + ext)
   return path
 }
 
@@ -191,6 +210,7 @@ async function download (job, next) {
   let url = job.url
   // let drive = job.api.hyperdrive
 
+  debug('fetch', url)
   let response = await ky(url)
   let text = await response.text()
 
@@ -206,19 +226,27 @@ async function download (job, next) {
 
 async function freeze (job, next) {
   const dom = job.getResource('dom')
+  let html = job.getResource('html')
+  if (!dom) return next()
 
-  const html = await freezeDry(dom.window.document, {
-    docUrl: job.url,
-    fetchResource,
-    blobToURL,
-    getCsp
-  })
+  try {
+    html = await freezeDry(dom.window.document, {
+      docUrl: job.url,
+      fetchResource,
+      blobToURL,
+      getCsp
+    })
+  } catch (err) {
+    job.error('Cannot freeze-dry', dom.window.location, err)
+  }
 
   // job.addResource('html-clean', html)
   let filepath = urlToFilename(job.url)
+  // if (!filepath.match(/\.html?$/)) {
   if (filepath.substring(-1).charAt(0) === '/') {
-    filepath = filepath + 'index.html'
+    filepath = p.join(filepath, 'index.html')
   }
+  console.log('addFile', filepath)
   job.addFile(filepath, html)
   job.addRecord('file', { path: filepath, mimetype: 'text/html' })
 
@@ -227,10 +255,16 @@ async function freeze (job, next) {
   next()
 
   async function fetchResource (url, opts) {
+    if (url.startsWith('data:')) return url
     // TODO: Fetch locally..
     // const filename = urlToFilename(url, opts)
-    const response = await ky(url, opts)
-    return response
+    try {
+      const response = await ky(url, opts)
+      return response
+    } catch (err) {
+      console.error('ERROR FETCHING', url, err)
+      return url
+    }
     // return ky(...args)
     // return got(...args)
   }
@@ -238,16 +272,37 @@ async function freeze (job, next) {
   async function blobToURL (blob, link, resource) {
     // const name = hash(blob)
     // console.log('make url: res', resource)
-    const filename = urlToFilename(link.resource.url)
-    const parent = urlToFilename(resource.url)
-    const relative = p.relative(parent, filename)
-    job.addFile(filename, blob.toBuffer())
-    return relative
+    if (!blob) return null
+    let metadata = {}
+    if (blob.type) {
+      metadata.headers = Buffer.from(JSON.stringify({ 'content-type': blob.type }))
+    }
+    const buf = blob.toBuffer()
+    const filename = blobToFilename(buf, link.resource.url)
+    job.addFile(filename, blob.toBuffer(), metadata)
+    return filename
+    // const url = '/' + filename
+    // return url
+
+    // const filename = urlToFilename(link.resource.url, { hash: false })
+    // const parent = urlToFilename(resource.url)
+    // const relative = p.relative(parent, filename)
+    // job.addFile(filename, blob.toBuffer())
+    // return relative
     // return '/' + filename
   }
 
   function getCsp (resource) {
-    return null
+    const csp = [
+      "default-src 'none'", // By default, block all connectivity and scripts.
+      "img-src 'self' data:", // Allow inlined images.
+      "media-src 'self' data:", // Allow inlined audio/video.
+      "style-src 'self' data: 'unsafe-inline'", // Allow inlined styles.
+      "font-src 'self' data:", // Allow inlined fonts.
+      'frame-src data:' // Allow inlined iframes.
+    ].join('; ')
+
+    return csp
   }
   // setTimeout(() => next(), 1000)
 }
@@ -267,6 +322,7 @@ metascrape.name = 'metascrape'
 
 function readable (job, next) {
   const html = job.getResource('html')
+  if (!html) return next()
   const readable = readability(html, { href: job.url })
   // job.addResource('readable', readable)
   const md = htmlToMd(readable.content)
@@ -306,10 +362,10 @@ function _saveFiles (job, drive, next) {
 
   let missing = 0
 
-  for (let [filename, content] of Object.entries(job.files)) {
-    if (typeof content === 'string') content = Buffer.from(content, 'utf8')
-    if (!content) {
-      job.error('No content set for file', filename)
+  for (let [filename, { value, metadata }] of Object.entries(job.files)) {
+    if (typeof value === 'string') value = Buffer.from(value, 'utf8')
+    if (!value) {
+      job.error('No value set for file', filename)
       continue
     }
 
@@ -319,7 +375,7 @@ function _saveFiles (job, drive, next) {
 
     mkdirp(p.dirname(filename), { fs: drive }, (err, cb) => {
       if (err && err.code !== 'EEXIST') return cb(err)
-      drive.writeFile(filename, content, err => {
+      drive.writeFile(filename, value, { metadata }, err => {
         let msg = 'Written file: ' + filename
         done(err, msg)
       })
@@ -359,7 +415,8 @@ function _saveFiles (job, drive, next) {
 
 function hash (blob) {
   let input = Buffer.from(blob)
-  let output = Buffer.alloc(128)
-  let hash = blake2b(output.length).update(input).digest('hex')
-  return hash
+  // let output = Buffer.alloc(128)
+  // let hash = blake2b(output.length).update(input).digest('hex')
+  // return hash
+  return crypto.data(input)
 }

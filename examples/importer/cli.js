@@ -36,6 +36,7 @@ function run (argv, cb) {
     // case 'status': return status()
     case 'show': return show(args, argv, cb)
     case 'search': return search(args, argv, cb)
+    case 'serve': return serve(args, argv, cb)
     default: return usage(args, argv, cb)
   }
 }
@@ -46,9 +47,10 @@ function usage (args, argv, cb) {
 Commands:
 
   add URL
-  work
+  search
   status
   show
+  serve
 
 Options:
   -k, --key    Content store key
@@ -69,6 +71,12 @@ function add (args, opts, cb) {
   if (!url) return cb(new Error('URL is required.'))
   console.log('add', url)
   importer.add(url, cb)
+}
+
+function serve (args, opts, cb) {
+  const importer = open(opts)
+  const cstore = importer.cstore
+  require('./serve')(cstore)
 }
 
 function mirror (args, opts, cb) {

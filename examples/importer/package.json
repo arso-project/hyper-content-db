@@ -9,11 +9,11 @@
 		"author": "",
 		"license": "GPL-3.0",
 		"dependencies": {
+				"express": "^4.17.1",
 				"freeze-dry": "github:Frando/freeze-dry#node-compat-dev",
 				"jsdom": "^11.11.0",
 				"ky": "^0.9.0",
 				"ky-universal": "^0.1.0",
-				"sonar": "github:Frando/sonar#master",
 				"metascraper": "^4.10.1",
 				"metascraper-author": "^4.10.1",
 				"metascraper-clearbit-logo": "^4.10.1",
@@ -32,6 +32,7 @@
 				"rehype-parse": "6.0.0",
 				"rehype-remark": "5.0.1",
 				"remark-stringify": "6.0.4",
+				"sonar": "github:Frando/sonar#master",
 				"unified": "7.1.0"
 		}
 }
