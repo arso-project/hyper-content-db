@@ -38,16 +38,19 @@ tape('schema view', t => {
 
   let _run = false
 
+  let runs = 0
   store1.batch(batch, (err, ids) => {
     t.error(err, 'batch')
     store1.on('indexed', () => {
-      query()
+      console.log('INDEXED')
+      if (++runs === 2) query()
     })
   })
 
   function query () {
     if (_run) return
     _run = true
+    console.log('run q')
 
     const queries = [
       {

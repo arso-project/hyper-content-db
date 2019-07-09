@@ -24,6 +24,7 @@ function schemaView (db, cstore) {
           })
         }
       })
+      console.log('MAP', ops)
       next(ops)
     })
   }
@@ -38,37 +39,8 @@ function schemaView (db, cstore) {
       //   reverse: true,
       //   limit: 10
       // }
-      if (!opts.schema || !opts.prop) return cb(new Error('schema and prop are required.'))
 
-      // const { schema, prop, value, gt, lt, gte, lte, reverse, limit } = opts
-
-      const lvlopts = {
-        reverse: opts.reverse,
-        limit: opts.limit
-      }
-      const key = `${opts.schema}|${opts.prop}|`
-      lvlopts.gt = key + CHAR_SPLIT
-      lvlopts.lt = key + CHAR_END
-      if (opts.value) {
-        lvlopts.gt = key + opts.value + CHAR_SPLIT
-        lvlopts.lt = key + opts.value + CHAR_SPLIT + CHAR_END
-      } else if (opts.gt) {
-        lvlopts.gt = key + opts.gt + CHAR_SPLIT
-        lvlopts.lt = key + opts.gt + CHAR_END
-      } else if (opts.gte) {
-        lvlopts.gte = key + opts.gte + CHAR_SPLIT
-        lvlopts.lt = key + opts.gte + CHAR_END
-      }
-      if (opts.lt) {
-        lvlopts.lt = key + opts.lt + CHAR_START
-      } else if (opts.lte) {
-        lvlopts.lt = undefined
-        lvlopts.lte = key + opts.lte + CHAR_END
-      }
-
-      const rs = db.createReadStream(lvlopts)
-
-      const transform = new Transform({
+      const proxy = new Transform({
         objectMode: true,
         transform (row, enc, next) {
           this.push(decodeNode(row))
@@ -76,7 +48,50 @@ function schemaView (db, cstore) {
         }
       })
 
-      return rs.pipe(transform)
+      process.nextTick(init)
+
+      return proxy
+
+      function init () {
+        if (!opts.schema || !opts.prop) return proxy.destroy(new Error('schema and prop are required.'))
+        cstore.expandSchemaName(opts.schema, (err, name) => {
+          if (err) return proxy.destroy(new Error('Invalid schema name.'))
+          opts.schema = name
+          run()
+        })
+      }
+
+      // const { schema, prop, value, gt, lt, gte, lte, reverse, limit } = opts
+
+      function run () {
+        const lvlopts = {
+          reverse: opts.reverse,
+          limit: opts.limit
+        }
+        const key = `${opts.schema}|${opts.prop}|`
+        lvlopts.gt = key + CHAR_SPLIT
+        lvlopts.lt = key + CHAR_END
+        if (opts.value) {
+          lvlopts.gt = key + opts.value + CHAR_SPLIT
+          lvlopts.lt = key + opts.value + CHAR_SPLIT + CHAR_END
+        } else if (opts.gt) {
+          lvlopts.gt = key + opts.gt + CHAR_SPLIT
+          lvlopts.lt = key + opts.gt + CHAR_END
+        } else if (opts.gte) {
+          lvlopts.gte = key + opts.gte + CHAR_SPLIT
+          lvlopts.lt = key + opts.gte + CHAR_END
+        }
+        if (opts.lt) {
+          lvlopts.lt = key + opts.lt + CHAR_START
+        } else if (opts.lte) {
+          lvlopts.lt = undefined
+          lvlopts.lte = key + opts.lte + CHAR_END
+        }
+
+        const rs = db.createReadStream(lvlopts)
+
+        rs.pipe(proxy)
+      }
 
       // TODO: continue...
     }

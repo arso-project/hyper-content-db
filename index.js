@@ -119,7 +119,6 @@ class Contentcore extends EventEmitter {
         })
       })
     })
-
   }
 
   getRecords (schema, id, cb) {
@@ -197,6 +196,8 @@ class Contentcore extends EventEmitter {
         let expanded = hex(drive.key) + name.substring(1)
         cb(null, expanded)
       })
+    } else {
+      cb(null, name)
     }
   }
 

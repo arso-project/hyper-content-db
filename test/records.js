@@ -25,6 +25,7 @@ tape('prefix', t => {
       drive.writeFile('foo', 'bar', (err) => {
         t.error(err, 'noerr writeFile')
         store1.putRecord(schema, cstore.id(), record1, (err, id) => {
+          console.log('PUT DONE', err, id)
           t.error(err, 'noerr putRecord')
         })
       })
