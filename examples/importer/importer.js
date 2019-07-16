@@ -11,7 +11,7 @@ class Importer {
     this.ready = thunky(this._ready.bind(this))
     this.workers = []
 
-    this.cstore.useLevelView('sonar', sonarView)
+    this.cstore.useRecordView('sonar', sonarView)
   }
 
   _ready (cb) {

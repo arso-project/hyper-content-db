@@ -33,10 +33,12 @@ Kappa.prototype.use = function (name, version, view) {
     fetchState: view.fetchState,
     storeState: view.storeState
   })
+  idx.name = name
 
   // TODO: Rethink event names.
   idx.on('indexed', (driveKey, batch) => {
-    this.emit('indexed', driveKey)
+    console.log('kappa indexed', name)
+    this.emit('indexed', name)
     if (view.indexed) view.indexed(batch)
   })
 

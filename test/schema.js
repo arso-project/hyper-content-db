@@ -3,7 +3,7 @@ const cstore = require('..')
 const ram = require('random-access-memory')
 const view = require('../views/schema-aware.js')
 
-tape('schema view', t => {
+tape.only('schema view', t => {
   const store1 = cstore(ram)
 
   const schema = 'post'
@@ -21,7 +21,7 @@ tape('schema view', t => {
     }
   })
 
-  store1.useLevelView('idx', view)
+  store1.useRecordView('idx', view)
 
   let rows = [
     { title: 'abcd', date: '2019-11' },
@@ -38,12 +38,11 @@ tape('schema view', t => {
 
   let _run = false
 
-  let runs = 0
   store1.batch(batch, (err, ids) => {
     t.error(err, 'batch')
-    store1.on('indexed', () => {
-      console.log('INDEXED')
-      if (++runs === 2) query()
+    store1.on('indexed', (name) => {
+      console.log('indexed', name)
+      if (name === 'idx') query()
     })
   })
 

@@ -5,29 +5,59 @@ const { CHAR_END, CHAR_SPLIT, CHAR_START } = require('../constants')
 module.exports = schemaView
 
 function schemaView (db, cstore) {
-  function map (msg, next) {
+  async function map (msgs, next) {
+    let bins = {}
     const ops = []
-    const { id, source, seq, schema, value } = msg
-    // TODO: This should not run on each map cycle.
-    cstore.getSchema(schema, (err, schemadef) => {
-      // console.log('get', err, schema)
-      if (err || !schemadef) return
-      Object.entries(schemadef.properties).forEach(([name, def]) => {
-        if (def.index) {
-          if (typeof value[name] === 'undefined') return
-          const ikey = `${schema}|${name}|${value[name]}` + CHAR_SPLIT + `${id}|${source}`
-          const ivalue = seq
-          ops.push({
-            type: 'put',
-            key: ikey,
-            value: ivalue
+    const proms = []
+
+    for (let msg of msgs) {
+      const { schema: name } = msg
+      if (!bins[name]) {
+        bins[name] = { msgs: [] }
+        proms.push(new Promise(resolve => {
+          cstore.getSchema(name, (err, schema) => {
+            bins[name].schema = schema
+            resolve()
           })
-        }
-      })
-      console.log('MAP', ops)
-      next(ops)
+        }))
+      }
+      bins[name].msgs.push(msg)
+    }
+
+    // Wait until all schemas are loaded.
+    await Promise.all(proms)
+
+    Object.values(bins).forEach(bin => {
+      // Filter out messages without a schema.
+      if (!bin.schema) return
+      bin.msgs.forEach(msg => mapMessage(bin.schema, msg))
     })
+
+    db.batch(ops, () => {
+      next()
+    })
+
+    function mapMessage (schema, msg) {
+      const { id, source, seq, schema: schemaName, value } = msg
+      for (let [name, def] of Object.entries(schema.properties)) {
+        if (!def.index) continue
+        if (typeof value[name] === 'undefined') continue
+
+        const ikey = `${schemaName}|${name}|${value[name]}` +
+          CHAR_SPLIT +
+          `${id}|${source}`
+
+        const ivalue = seq
+
+        ops.push({
+          type: 'put',
+          key: ikey,
+          value: ivalue
+        })
+      }
+    }
   }
+
   const api = {
     query (kcore, opts, cb) {
       // const example = {
@@ -96,6 +126,7 @@ function schemaView (db, cstore) {
       // TODO: continue...
     }
   }
+
   return {
     map,
     api

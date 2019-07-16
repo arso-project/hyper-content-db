@@ -1,7 +1,8 @@
 const { State } = require('./lib/messages')
 const hypertrieIndex = require('hypertrie-index')
 const thunky = require('thunky')
-const { messages: { Stat: StatEncoder } } = require('hyperdrive-schemas')
+// const { messages: { Stat: StatEncoder } } = require('hyperdrive-schemas')
+const StatEncoder = require('hyperdrive/lib/stat')
 const inspect = require('inspect-custom-symbol')
 const { EventEmitter } = require('events')
 
@@ -66,6 +67,7 @@ class MultidriveIndex extends EventEmitter {
 
     index.on('indexed', (nodes) => {
       if (nodes && nodes.length) {
+        // console.log('multidrive-index indexed', this.name, nodes)
         this.emit('indexed', drive.key, nodes)
       }
     })

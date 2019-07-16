@@ -4,6 +4,7 @@ const { EventEmitter } = require('events')
 const hyperid = require('hyperid')
 const memdb = require('memdb')
 const sub = require('subleveldown')
+const levelBaseView = require('kappa-view')
 
 const multidrive = require('./multidrive')
 const kappa = require('./kappa')
@@ -30,13 +31,21 @@ class Contentcore extends EventEmitter {
 
     this.kcore.on('indexed', (...args) => this.emit('indexed', ...args))
 
-    this.useLevelView('entities', entitiesView)
+    this.useRecordView('entities', entitiesView)
   }
 
-  useLevelView (name, makeInnerView) {
+  useRecordView (name, makeView) {
     const db = sub(this.level, 'view.' + name)
-    const innerView = makeInnerView(db, this)
-    const view = contentView(db, innerView)
+    // levelBaseView takes care of the state handling
+    // and passes on a subdb, and expects regular
+    // kappa view opts (i.e., map).
+    const view = levelBaseView(db, (db) => {
+      // contentView wraps the inner view, taking care of
+      // adding a .data prefix and optionally loading
+      // record contents.
+      return contentView(makeView(db, this))
+    })
+
     this.kcore.use(name, view)
     this.api[name] = this.kcore.api[name]
   }

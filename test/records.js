@@ -7,17 +7,18 @@ tape('prefix', t => {
   const schema = 'arso.xyz/Entity'
   const record1 = { title: 'world', tags: ['foo', 'bar'] }
   let results = []
-  store1.use('view', {
-    prefix: '.data',
+  store1.useRecordView('view', () => ({
     map (msgs, next) {
       results = [...results, ...msgs]
       next()
     },
     indexed () {
       t.equal(results.length, 1, 'one result')
+      t.equal(results[0].value.title, 'world', 'value matches')
+      console.log('results', results)
       t.end()
     }
-  })
+  }))
 
   store1.ready(() => {
     store1.writer((err, drive) => {
@@ -48,6 +49,7 @@ tape('records', t => {
       store2.put(schema, id1, record2, err => {
         t.error(err, 'no err')
         replicate(store1, store2, () => {
+          console.log('hi')
           store2.getRecords(schema, id1, (err, records) => {
             t.error(err, 'no err')
             t.equal(records.length, 2)
