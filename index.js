@@ -226,7 +226,7 @@ class Contentcore extends EventEmitter {
 
       const path = makePath(schema, id)
       const source = hex(drive.key)
-      const record = { path, source, id, schema }
+      const record = { source, id, schema }
 
       drive.stat(path, (err, stat) => {
         if (err) return cb(null)
