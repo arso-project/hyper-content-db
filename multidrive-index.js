@@ -16,7 +16,7 @@ class MultidriveIndex extends EventEmitter {
     this._map = opts.map
     this._readFile = opts.readFile
 
-    this._states = new Map()
+    this._states = {}
     this._indexes = new Map()
 
     if (!opts.storeState && !opts.fetchState && !opts.clearIndex) {
@@ -40,19 +40,19 @@ class MultidriveIndex extends EventEmitter {
     }
 
     this.ready = thunky(this._ready.bind(this))
-    this.multidrive.on('source', this.source.bind(this))
+    this.multidrive.on('source', this._source.bind(this))
     this.ready()
   }
 
   _ready (cb) {
     this.multidrive.ready(() => {
       this.multidrive.sources(sources => {
-        sources.forEach(source => this.source(source))
+        sources.forEach(source => this._source(source))
       })
     })
   }
 
-  source (drive) {
+  _source (drive) {
     if (this._indexes.has(drive.key)) return
     const self = this
     const opts = {
@@ -98,8 +98,7 @@ class MultidriveIndex extends EventEmitter {
   }
 
   _storeDriveState (key, state, cb) {
-    this._states.set(key, state)
-    // console.log('STORE STATE', key, state)
+    this._states[key.toString('hex')] = state
     let buf = this._encodeStates()
     this._storeState(buf, cb)
   }
@@ -108,15 +107,14 @@ class MultidriveIndex extends EventEmitter {
     this._fetchState((err, data) => {
       if (err) return cb(err)
       this._decodeStates(data)
-      const state = this._states.get(key)
-      // console.log('FETCH STATE', key, state)
+      const state = this._states[key.toString('hex')]
       cb(null, state)
     })
   }
 
   _encodeStates () {
     const states = []
-    for (let [key, state] of this._states.entries()) {
+    for (let [key, state] of Object.entries(this._states)) {
       states.push({ key, state })
     }
     return State.encode({ states })
@@ -126,7 +124,7 @@ class MultidriveIndex extends EventEmitter {
     if (!buf) return {}
     let value = State.decode(buf)
     value.states.forEach(({ key, state }) => {
-      this._states.set(key, state)
+      this._states[key] = state
     })
     return this._states
   }

@@ -1,20 +1,32 @@
 const cstore = require('../..')
 const thunky = require('thunky')
 const sonarView = require('./views/sonar')
+const leveldb = require('level')
+const p = require('path')
+const mkdirp = require('mkdirp')
 
 module.exports = (...args) => new Importer(...args)
 
 class Importer {
   constructor (opts) {
     this._opts = opts
-    this.cstore = cstore(opts.storage, opts.key)
     this.ready = thunky(this._ready.bind(this))
     this.workers = []
-
-    this.cstore.useRecordView('sonar', sonarView)
   }
 
   _ready (cb) {
+    const basePath = this._opts.storage
+    const paths = {
+      level: p.join(basePath, 'level'),
+      corestore: p.join(basePath, 'corestore'),
+      sonar: p.join(basePath, 'sonar')
+    }
+    Object.values(paths).forEach(p => mkdirp.sync(p))
+
+    this.level = leveldb(paths.level, 'level')
+    this.cstore = cstore(paths.corestore, this._opts.key, { level: this.level })
+    this.cstore.useRecordView('sonar', sonarView, { storage: paths.sonar })
+
     this.cstore.writer((err, drive) => {
       const key = hex(this.cstore.key)
       const localKey = hex(drive.key)

@@ -186,7 +186,7 @@ class Multidrive extends EventEmitter {
       })
       // Each hyperdrive has two feeds, so increase the amount
       // of expected feeds.
-      stream.expectedFeeds = stream.expectedFeeds + 2
+      // stream.expectedFeeds = stream.expectedFeeds + 2
     }
   }
 }

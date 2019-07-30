@@ -1,5 +1,6 @@
 const express = require('express')
 const p = require('path')
+const Swarm = require('corestore-swarm-networking')
 
 module.exports = serve
 
@@ -9,7 +10,18 @@ function logErrors (err, req, res, next) {
   next(err)
 }
 
+function share (cstore) {
+  // const swarm = new Swarm(cstore)
+  // swarm.listen()
+  // const core = swarm.default()
+  // core.ready(() => {
+  //   swarm.seed(core.key)
+  //   console.log('Seeding ' + core.key.toString('hex'))
+  // })
+}
+
 function serve (cstore) {
+  // share(cstore)
   const port = 8080
   const host = 'localhost'
   const app = express()

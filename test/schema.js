@@ -3,7 +3,7 @@ const cstore = require('..')
 const ram = require('random-access-memory')
 const view = require('../views/schema-aware.js')
 
-tape.only('schema view', t => {
+tape('schema view', t => {
   const store1 = cstore(ram)
 
   const schema = 'post'

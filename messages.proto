@@ -1,6 +1,6 @@
 message State {
   message FeedState {
-    required bytes key = 1;
+    required string key = 1;
     required bytes state = 2;
   }
   repeated FeedState states = 1;

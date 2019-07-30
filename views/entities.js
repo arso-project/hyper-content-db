@@ -4,14 +4,24 @@ module.exports = entityView
 
 function entityView (db) {
   return {
-    map (msg, next) {
-      const { id, schema, seq, source } = msg
-      let value = `${source}@${seq}`
-      let rows = [
-        [`is|${id}|${schema}`, value],
-        [`si|${schema}|${id}`, value]
-      ]
-      next(rows.map(r => ({ type: 'put', key: r[0], value: r[1] })))
+    map (msgs, next) {
+      const ops = []
+      msgs.forEach(msg => {
+        const { id, schema, seq, source } = msg
+        let value = `${source}@${seq}`
+        let type = 'put'
+        ops.push({
+          type,
+          key: `is|${id}|${schema}`,
+          value
+        })
+        ops.push({
+          type,
+          key: `si|${schema}|${id}`,
+          value
+        })
+      })
+      db.batch(ops, next)
     },
     api: {
       all (kcore, cb) {

@@ -34,7 +34,7 @@ class Contentcore extends EventEmitter {
     this.useRecordView('entities', entitiesView)
   }
 
-  useRecordView (name, makeView) {
+  useRecordView (name, makeView, opts) {
     const db = sub(this.level, 'view.' + name)
     // levelBaseView takes care of the state handling
     // and passes on a subdb, and expects regular
@@ -43,7 +43,7 @@ class Contentcore extends EventEmitter {
       // contentView wraps the inner view, taking care of
       // adding a .data prefix and optionally loading
       // record contents.
-      return contentView(makeView(db, this))
+      return contentView(makeView(db, this, opts))
     })
 
     this.kcore.use(name, view)

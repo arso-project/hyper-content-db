@@ -82,40 +82,39 @@ function serve (args, opts, cb) {
 function mirror (args, opts, cb) {
   console.log(opts)
   const importer = open(opts)
-  const store = importer.cstore
-  store.writer((err, drive) => {
-    // console.log('go', drive)
-    let target = p.resolve(args[0])
-    console.log('TARGET', target)
-    const equals = function (src, dst, cb) {
-      cb(null, false)
-    }
-    let prog = mirrorFolder({ name: '/', fs: drive }, p.resolve(args[0]), { equals }, (err, res) => {
-      console.log('done', err, res)
+  importer.ready(() => {
+    const store = importer.cstore
+    store.writer((err, drive) => {
+      // console.log('go', drive)
+      let target = p.resolve(args[0])
+      console.log('TARGET', target)
+      const equals = function (src, dst, cb) {
+        cb(null, false)
+      }
+      let prog = mirrorFolder({ name: '/', fs: drive }, p.resolve(args[0]), { equals }, (err, res) => {
+        console.log('done', err, res)
+      })
     })
   })
 }
 
 function search (args, opts, cb) {
   const importer = open(opts)
-  const store = importer.cstore
-  store.ready(() => {
-    store.on('indexed', (key) => {
-      console.log('indexed!')
-      store.api.sonar.query(args.join(' '), (err, results) => {
-        if (!results) return console.log('no results', err)
-        console.log('RESULTS', err, results.results.map(r => {
-          return { score: r.score, title: r.doc.title }
-        }))
-      })
+  importer.ready(() => {
+    const store = importer.cstore
+    store.api.sonar.query(args.join(' '), (err, results) => {
+      if (!results) return console.log('no results', err)
+      console.log('RESULTS', err, results.results.map(r => {
+        return { score: r.score, title: r.doc.title }
+      }))
     })
   })
 }
 
 function show (args, opts, cb) {
   const importer = open(opts)
-  const store = importer.cstore
-  store.ready(() => {
+  importer.ready(() => {
+    const store = importer.cstore
     store.on('indexed', (key) => {
       let records = []
       store.api.entities.all((err, list) => {

@@ -2,6 +2,7 @@ var inherits = require('inherits')
 var EventEmitter = require('events').EventEmitter
 var hypercore = require('hypercore')
 var indexer = require('./multidrive-index')
+const debug = require('debug')('kappa')
 
 module.exports = Kappa
 
@@ -37,9 +38,9 @@ Kappa.prototype.use = function (name, version, view) {
 
   // TODO: Rethink event names.
   idx.on('indexed', (driveKey, batch) => {
-    console.log('kappa indexed', name)
-    this.emit('indexed', name)
-    if (view.indexed) view.indexed(batch)
+    debug('kappa indexed', name, driveKey.toString('hex'))
+    this.emit('indexed', name, batch, driveKey)
+    if (view.indexed) view.indexed(batch, driveKey)
   })
 
   // idx.on('error', function (err) {

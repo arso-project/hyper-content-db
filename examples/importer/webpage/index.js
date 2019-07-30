@@ -31,7 +31,7 @@ const metascraper = require('metascraper')([
   require('metascraper-url')()
 ])
 
-const readability = require('readability-from-string')
+const Readability = require('readability')
 
 module.exports = importer
 
@@ -219,7 +219,7 @@ async function download (job, next) {
 
   // job.addFile(filepath, text)
 
-  const dom = new jsdom.JSDOM(text)
+  const dom = new jsdom.JSDOM(text, { url })
   job.addResource('dom', dom)
   next()
 }
@@ -321,18 +321,24 @@ async function metascrape (job, next) {
 metascrape.name = 'metascrape'
 
 function readable (job, next) {
-  const html = job.getResource('html')
-  if (!html) return next()
-  const readable = readability(html, { href: job.url })
+  // const html = job.getResource('html')
+  // if (!html) return next()
+  const dom = job.getResource('dom')
+  if (!dom) return next()
+
+  const article = new Readability(dom.window.document).parse()
+  // const readable = readability(html, { href: job.url })
   // job.addResource('readable', readable)
-  const md = htmlToMd(readable.content)
-  let content = `# ${readable.title}\n\n${md}`
+  const md = htmlToMd(article.content)
+  const content = `# ${article.title}\n\n${md}`
   // job.addDerivedFile('readable.md', content)
-  job.addRecord('readable', { ...readable, content })
+  const record = { ...article, content }
+  console.log('READABLE', record)
+  job.addRecord('readable', record)
   next()
 }
 
-readability.name = 'readability'
+readable.name = 'readability'
 
 function saveFiles (job, next) {
   job.cstore.writer((err, writer) => {

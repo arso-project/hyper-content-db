@@ -2,7 +2,7 @@ const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
 
-tape('entity view', t => {
+tape('entities', t => {
   const store1 = cstore(ram)
   const schema = 'arso.xyz/Entity'
   const schema2 = 'arso.xyz/Resource'
