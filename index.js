@@ -209,7 +209,6 @@ class Contentcore extends EventEmitter {
           const buf = Buffer.from(JSON.stringify(value))
           drive.writeFile(path, buf, (err) => {
             if (err) return cb(err)
-            console.log('WRITTEN', path, buf.toString())
             cb(null, id)
           })
         })
@@ -233,7 +232,7 @@ class Contentcore extends EventEmitter {
         if (err) return cb(null)
 
         if (opts.fullStat) record.stat = stat
-        else opts.stat = cleanStat(stat)
+        else record.stat = cleanStat(stat)
 
         drive.readFile(path, (err, buf) => {
           if (err) return
