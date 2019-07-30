@@ -1,4 +1,6 @@
 const { CHAR_END } = require('../constants')
+const through = require('through2')
+const pump = require('pump')
 
 module.exports = entityView
 
@@ -24,33 +26,30 @@ function entityView (db) {
       db.batch(ops, next)
     },
     api: {
-      all (kcore, cb) {
-        let ids = {}
+      all (kcore) {
         let rs = db.createReadStream({
           gt: 'is|',
           lt: 'is|' + CHAR_END
         })
-        rs.on('data', row => {
+
+        return pump(rs, through.obj(function (row, enc, next) {
           let [id, schema] = row.key.split('|').slice(1)
           let [source, seq] = row.value.split('@')
-          ids[id] = ids[id] || []
-          ids[id].push({ schema, source, seq })
-        })
-        rs.on('end', () => cb(null, ids))
+          this.push({ id, schema, source, seq })
+          next()
+        }))
       },
-      allWithSchema (kcore, schema, cb) {
-        let ids = {}
+      allWithSchema (kcore, schema) {
         let rs = db.createReadStream({
           gt: `si|${schema}|`,
           lt: `si|${schema}|` + CHAR_END
         })
-        rs.on('data', row => {
-          let id = row.key.split('|').pop()
+        return pump(rs, through.obj(function (row, enc, next) {
+          let [schema, id] = row.key.split('|').slice(1)
           let [source, seq] = row.value.split('@')
-          ids[id] = ids[id] || []
-          ids[id].push({ schema, source, seq })
-        })
-        rs.on('end', () => cb(null, ids))
+          this.push({ id, schema, source, seq })
+          next()
+        }))
       }
     }
   }

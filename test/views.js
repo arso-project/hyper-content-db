@@ -2,6 +2,24 @@ const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
 
+// function collect (stream, cb) {
+//   let buf = []
+//   stream.on('data', d => buf.push(d))
+//   stream.on('end', () => cb(null, buf))
+//   stream.on('error', err => cb(err))
+// }
+
+function collectById (stream, cb) {
+  let data = {}
+  stream.on('data', row => {
+    let { id } = row
+    data[id] = data[id] || []
+    data[id].push(row)
+  })
+  stream.on('end', () => cb(null, data))
+  stream.on('error', err => cb(err))
+}
+
 tape('entities', t => {
   const store1 = cstore(ram)
   const schema = 'arso.xyz/Entity'
@@ -24,31 +42,40 @@ tape('entities', t => {
 
   store1.on('indexed', () => {
     const ev = store1.api.entities
-    step((done) => ev.all((err, rows) => {
-      t.error(err)
-      t.equal(Object.keys(rows).length, 3, 'row count matches')
-      t.equal(rows[ids[1]].length, 2, 'two records for two schemas')
-      t.deepEqual(
-        rows[ids[1]].map(r => r.schema).sort(),
-        [schema, schema2],
-        'schemas match'
-      )
-      done()
-    }))
+    step((done) => {
+      const rs = ev.all()
+      collectById(rs, (err, rows) => {
+        t.error(err)
+        t.equal(Object.keys(rows).length, 3, 'row count matches')
+        t.equal(rows[ids[1]].length, 2, 'two records for two schemas')
+        t.deepEqual(
+          rows[ids[1]].map(r => r.schema).sort(),
+          [schema, schema2],
+          'schemas match'
+        )
+        done()
+      })
+    })
 
-    step((done) => ev.allWithSchema(schema2, (err, rows) => {
-      t.error(err)
-      t.equal(Object.keys(rows).length, 1, 'count for schema2 matches')
-      t.equal(rows[ids[1]][0].schema, schema2, 'schema matches')
-      done()
-    }))
+    step((done) => {
+      const rs = ev.allWithSchema(schema2)
+      collectById(rs, (err, rows) => {
+        t.error(err)
+        t.equal(Object.keys(rows).length, 1, 'count for schema2 matches')
+        t.equal(rows[ids[1]][0].schema, schema2, 'schema matches')
+        done()
+      })
+    })
 
-    step((done) => ev.allWithSchema(schema, (err, rows) => {
-      t.error(err)
-      t.equal(Object.keys(rows).length, 3, 'count for schema1 matches')
-      t.deepEqual(Object.keys(rows).sort(), ids.sort(), 'ids match')
-      done()
-    }))
+    step((done) => {
+      const rs = ev.allWithSchema(schema)
+      collectById(rs, (err, rows) => {
+        t.error(err)
+        t.equal(Object.keys(rows).length, 3, 'count for schema1 matches')
+        t.deepEqual(Object.keys(rows).sort(), ids.sort(), 'ids match')
+        done()
+      })
+    })
   })
 
   function step (fn) {
