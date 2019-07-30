@@ -140,6 +140,7 @@ class Contentcore extends EventEmitter {
       this.writer((err, drive) => {
         if (err) return cb(err)
         const dir = p.join(P_DATA, schema)
+        if (!id) id = this.id()
 
         drive.mkdir(dir, (err) => {
           if (err && err.code !== 'EEXIST') return cb(err)
