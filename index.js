@@ -178,10 +178,10 @@ class Contentcore extends EventEmitter {
    *
    * For details see example in tests.
    */
-  createGetStream () {
+  createGetStream (opts) {
     const self = this
     return through.obj(function (msg, enc, next) {
-      self.get(msg, (err, record) => {
+      self.get(msg, opts, (err, record) => {
         if (err) this.error(err)
         else this.push(record)
         next()
@@ -217,8 +217,10 @@ class Contentcore extends EventEmitter {
     })
   }
 
-  get (opts, cb) {
-    const { id, schema, source, seq } = opts
+  get (req, opts = {}, cb) {
+    if (typeof opts === 'function') return this.get(req, null, opts)
+
+    const { id, schema, source, seq } = req
 
     this.source(source, drive => {
       if (!drive) return cb()
@@ -226,11 +228,15 @@ class Contentcore extends EventEmitter {
       const path = makePath(schema, id)
       const source = hex(drive.key)
       const record = { path, source, id, schema }
+
       drive.stat(path, (err, stat) => {
-        if (err) return onrecord(null)
-        record.stat = stat
+        if (err) return cb(null)
+
+        if (opts.fullStat) record.stat = stat
+        else opts.stat = cleanStat(stat)
+
         drive.readFile(path, (err, buf) => {
-          if (err) return 
+          if (err) return
           try {
             const value = JSON.parse(buf.toString())
             record.value = value
@@ -455,5 +461,11 @@ function mkdirp (fs, path, cb) {
       if (err && err !== 'EEXIST') error(err)
       if (--pending === 0) cb()
     })
+  }
+}
+
+function cleanStat (stat) {
+  return {
+    ctime: stat.ctime
   }
 }
