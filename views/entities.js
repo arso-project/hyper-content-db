@@ -7,6 +7,7 @@ module.exports = entityView
 function entityView (db) {
   return {
     map (msgs, next) {
+      // console.log('ldb MSGS', msgs)
       const ops = []
       msgs.forEach(msg => {
         const { id, schema, seq, source } = msg
@@ -23,6 +24,7 @@ function entityView (db) {
           value
         })
       })
+      // console.log('ldb BATCH', ops)
       db.batch(ops, next)
     },
     api: {
@@ -32,7 +34,8 @@ function entityView (db) {
           lt: 'is|' + CHAR_END
         })
 
-        return pump(rs, through.obj(function (row, enc, next) {
+        return rs.pipe(through.obj(function (row, enc, next) {
+          // console.log('ldb GET', row)
           let [id, schema] = row.key.split('|').slice(1)
           let [source, seq] = row.value.split('@')
           this.push({ id, schema, source, seq })
@@ -44,7 +47,7 @@ function entityView (db) {
           gt: `si|${schema}|`,
           lt: `si|${schema}|` + CHAR_END
         })
-        return pump(rs, through.obj(function (row, enc, next) {
+        return rs.pipe(through.obj(function (row, enc, next) {
           let [schema, id] = row.key.split('|').slice(1)
           let [source, seq] = row.value.split('@')
           this.push({ id, schema, source, seq })

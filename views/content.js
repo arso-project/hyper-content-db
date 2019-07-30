@@ -6,6 +6,7 @@ function contentView (opts) {
     transformNodes: true,
     readFile: true,
     map (msgs, next) {
+      // console.log('contentView MSGS', msgs)
       // let ops = []
       // let pending = 0
       msgs = msgs.map(msg => {

@@ -1,6 +1,8 @@
 const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
+const collect = require('collect-stream')
+const L = require('lodash')
 
 tape('prefix', t => {
   const store1 = cstore(ram)
@@ -98,6 +100,52 @@ tape('batch', t => {
     const sources = records.map(r => r.value.title).sort()
     t.deepEqual(results, sources, 'results match')
     t.end()
+  }
+})
+
+tape('batch and get stream', t => {
+  const store = cstore(ram)
+
+  const records = [
+    {
+      op: 'put',
+      schema: 'event',
+      value: {
+        date: new Date(2019, 12, 10),
+        title: 'Release'
+      }
+    },
+    {
+      op: 'put',
+      schema: 'event',
+      value: {
+        date: new Date(2019, 9, 2),
+        title: 'Party'
+      }
+    }
+  ]
+
+  const stream = store.createBatchStream()
+  stream.write(records)
+
+  stream.on('data', data => console.log('batch result', data))
+
+  store.on('indexed', query)
+
+  stream.on('error', err => t.error(err))
+
+  function query () {
+    const queryStream = store.api.entities.all()
+    const getTransform = store.createGetStream()
+    const resultStream = queryStream.pipe(getTransform)
+    collect(resultStream, (err, data) => {
+      t.error(err)
+      data = L.orderBy(data, r => r.value.title)
+      t.equal(data.length, 2)
+      t.equal(data[0].value.title, 'Party')
+      t.equal(data[1].value.title, 'Release')
+      t.end()
+    })
   }
 })
 

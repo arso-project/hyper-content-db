@@ -1,6 +1,7 @@
 const thunky = require('thunky')
 const p = require('path')
 const { EventEmitter } = require('events')
+const through = require('through2')
 const hyperid = require('hyperid')
 const memdb = require('memdb')
 const sub = require('subleveldown')
@@ -111,6 +112,7 @@ class Contentcore extends EventEmitter {
   }
 
   batch (msgs, cb) {
+    // TODO: Support del.
     const results = []
     const errors = []
     let missing = 0
@@ -129,6 +131,62 @@ class Contentcore extends EventEmitter {
       if (result) results.push(result)
       if (--missing === 0) cb(errors.length && errors, results)
     }
+  }
+
+  /**
+   * Create a batch stream.
+   *
+   * The returned stream is a transform stream. Write batch ops
+   * to it, read results and erros.
+   *
+   * Wants either array of ops or a single op, where op is
+   * {
+   *  op: 'put' | 'del',
+   *  id,
+   *  schema,
+   *  value
+   * }
+   *
+   * For details see example in tests.
+   */
+  createBatchStream () {
+    const self = this
+
+    const batchStream = through.obj(function (msg, encoding, next) {
+      msg = Array.isArray(msg) ? msg : [msg]
+      self.batch(msg, (err, ids) => {
+        if (err) this.error(err)
+        else this.push(ids)
+        next(err)
+      })
+    })
+
+    return batchStream
+  }
+
+  /**
+   * Create a get stream.
+   *
+   * The returned stream is a transform stream. Write get requests
+   * to it, read results and erros.
+   *
+   * Wants messages that look like
+   * { id, schema, source }
+   *
+   * TODO: Support no source.
+   * TODO: Support seq.
+   *
+   * For details see example in tests.
+   */
+  createGetStream () {
+    const self = this
+    return through.obj(function (msg, enc, next) {
+      self.get(msg, (err, record) => {
+        if (err) this.error(err)
+        else this.push(record)
+        next()
+      })
+    })
   }
 
   create (schema, value, cb) {
@@ -151,8 +209,35 @@ class Contentcore extends EventEmitter {
           const buf = Buffer.from(JSON.stringify(value))
           drive.writeFile(path, buf, (err) => {
             if (err) return cb(err)
+            console.log('WRITTEN', path, buf.toString())
             cb(null, id)
           })
+        })
+      })
+    })
+  }
+
+  get (opts, cb) {
+    const { id, schema, source, seq } = opts
+
+    this.source(source, drive => {
+      if (!drive) return cb()
+
+      const path = makePath(schema, id)
+      const source = hex(drive.key)
+      const record = { path, source, id, schema }
+      drive.stat(path, (err, stat) => {
+        if (err) return onrecord(null)
+        record.stat = stat
+        drive.readFile(path, (err, buf) => {
+          if (err) return 
+          try {
+            const value = JSON.parse(buf.toString())
+            record.value = value
+            cb(null, record)
+          } catch (err) {
+            cb(err)
+          }
         })
       })
     })
