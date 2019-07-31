@@ -130,7 +130,7 @@ tape('batch and get stream', t => {
 
   stream.on('data', data => console.log('batch result', data))
 
-  store.on('indexed', query)
+  store.on('indexed-all', query)
 
   stream.on('error', err => t.error(err))
 

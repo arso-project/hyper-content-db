@@ -12,6 +12,7 @@ const kappa = require('./kappa')
 
 const entitiesView = require('./views/entities')
 const contentView = require('./views/content')
+const schemaAwareView = require('./views/schema-aware')
 
 const { P_DATA, P_SCHEMA, P_SOURCES } = require('./constants')
 
@@ -31,10 +32,12 @@ class Contentcore extends EventEmitter {
     this.api = {}
 
     this.kcore.on('indexed', (...args) => this.emit('indexed', ...args))
+    this.kcore.on('indexed-all', (...args) => this.emit('indexed-all', ...args))
 
     this.id = Contentcore.id
 
     this.useRecordView('entities', entitiesView)
+    this.useRecordView('indexes', schemaAwareView)
   }
 
   useRecordView (name, makeView, opts) {
@@ -112,24 +115,27 @@ class Contentcore extends EventEmitter {
   }
 
   batch (msgs, cb) {
-    // TODO: Support del.
     const results = []
     const errors = []
-    let missing = 0
+    let pending = 0
 
-    msgs.forEach(msg => {
-      missing++
-      if (msg.op === 'put') this.put(msg.schema, msg.id, msg.value, finish)
-      // if (msg.op === 'del') this.put(msg.schema, msg.id, msg.value, finish)
-      // NOTE: Without process.nextTick this would break because missing would not fully
-      // increase before finishing.
+    for (let msg of msgs) {
+      pending++
+      const { op, schema, id, value } = msg
+
+      if (op === 'put') this.put(schema, id, value, finish)
+      // else if (op === 'del') this.del(schema, id, finish)
+      else if (op === 'schema') this.putSchema(schema, value, finish)
+
+      // NOTE: Without process.nextTick this would break because
+      // pending would not fullyincrease before finishing.
       else process.nextTick(finish)
-    })
+    }
 
     function finish (err, result) {
       if (err) errors.push(err)
       if (result) results.push(result)
-      if (--missing === 0) cb(errors.length && errors, results)
+      if (--pending === 0) cb(errors.length && errors, results)
     }
   }
 
@@ -141,7 +147,7 @@ class Contentcore extends EventEmitter {
    *
    * Wants either array of ops or a single op, where op is
    * {
-   *  op: 'put' | 'del',
+   *  op: 'put' | 'del' | 'schema',
    *  id,
    *  schema,
    *  value
@@ -172,6 +178,9 @@ class Contentcore extends EventEmitter {
    *
    * Wants messages that look like
    * { id, schema, source }
+   *
+   * Emits messages that look like
+   * { id, schema, source, value, stat }
    *
    * TODO: Support no source.
    * TODO: Support seq.
@@ -216,88 +225,70 @@ class Contentcore extends EventEmitter {
     })
   }
 
-  get (req, opts = {}, cb) {
+  get (req, opts, cb) {
     if (typeof opts === 'function') return this.get(req, null, opts)
 
+    opts = opts || {}
     const { id, schema, source, seq } = req
 
-    this.source(source, drive => {
-      if (!drive) return cb()
+    this.expandSchemaName(schema, (err, schema) => {
+      if (err) return cb(err)
+      if (source) {
+        this.source(source, drive => load(drive, cb))
+      } else {
+        let pending = 0
+        this.sources(drives => drives.forEach(drive => {
+          pending++
+          let results = []
+          load(drive, (err, record) => {
+            if (err) return cb(err)
+            if (record) results.push(record)
+            if (--pending === 0) cb(null, results)
+          })
+        }))
+      }
 
-      const path = makePath(schema, id)
-      const source = hex(drive.key)
-      const record = { source, id, schema }
+      function load (drive, cb) {
+        if (!drive) return cb()
 
-      drive.stat(path, (err, stat) => {
-        if (err) return cb(null)
+        const path = makePath(schema, id)
+        const source = hex(drive.key)
+        const record = { source, id, schema }
 
-        if (opts.fullStat) record.stat = stat
-        else record.stat = cleanStat(stat)
+        drive.stat(path, (err, stat) => {
+          if (err) return cb(null)
 
-        drive.readFile(path, (err, buf) => {
-          if (err) return
-          try {
-            const value = JSON.parse(buf.toString())
-            record.value = value
-            cb(null, record)
-          } catch (err) {
-            cb(err)
-          }
+          if (opts.fullStat) record.stat = stat
+          else record.stat = cleanStat(stat)
+
+          drive.readFile(path, (err, buf) => {
+            if (err) return
+            try {
+              const value = JSON.parse(buf.toString())
+              record.value = value
+              cb(null, record)
+            } catch (err) {
+              cb(err)
+            }
+          })
         })
-      })
+      }
     })
   }
 
   getRecords (schema, id, cb) {
-    this.expandSchemaName(schema, (err, schema) => {
-      if (err) return cb(err)
-      const records = []
-      const errors = []
-      let missing = 0
-      this.sources(drives => {
-        drives.forEach(drive => {
-          missing++
-          const path = makePath(schema, id)
-          const source = hex(drive.key)
-          const msg = { path, source, id, schema }
-          drive.stat(path, (err, stat) => {
-            if (err) return onrecord(null)
-            msg.stat = stat
-
-            drive.readFile(path, (err, buf) => {
-              if (err) return onrecord({ ...msg, error: err })
-              try {
-                const value = JSON.parse(buf.toString())
-                msg.value = value
-                onrecord(msg)
-              } catch (err) {
-                onrecord({ ...msg, error: err })
-              }
-            })
-          })
-        })
-      })
-
-      function onrecord (msg) {
-        if (msg && msg.error) errors.push(msg)
-        else if (msg) records.push(msg)
-        if (--missing === 0) {
-          let error = errors.length ? errors : null
-          cb(error, records)
-        }
-      }
-    })
+    return this.get({ schema, id }, cb)
   }
 
   listRecords (schema, cb) {
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
       let ids = []
-      let missing = 0
+      let pending = 0
       this.sources(drives => {
         drives.forEach(drive => {
           let path = p.join(P_DATA, schema)
-          missing++
+          pending++
           drive.readdir(path, (err, list) => {
             if (err) return finish(err)
             if (!list.length) return finish()
@@ -311,7 +302,7 @@ class Contentcore extends EventEmitter {
         if (!err && list) {
           ids = [...ids, ...list]
         }
-        if (--missing === 0) cb(null, list)
+        if (--pending === 0) cb(null, list)
       }
     })
   }
@@ -336,8 +327,9 @@ class Contentcore extends EventEmitter {
   putSchema (name, schema, cb) {
     this.expandSchemaName(name, (err, name) => {
       if (err && cb) return cb(err)
+      const encoded = this._encodeSchema(schema, name)
       const path = p.join(P_SCHEMA, name + '.json')
-      const buf = Buffer.from(JSON.stringify(this._encodeSchema(schema, name)))
+      const buf = Buffer.from(JSON.stringify(encoded))
       this.writer((err, drive) => {
         if (err) return cb(err)
         drive.writeFile(path, buf, cb)
@@ -349,7 +341,8 @@ class Contentcore extends EventEmitter {
     const defaults = {
       '$schema': 'http://json-schema.org/draft-07/schema#',
       '$id': `dat://${name}.json`,
-      type: 'object'
+      type: 'object',
+      title: schema.title || name
     }
     return Object.assign({}, defaults, schema)
   }
@@ -359,7 +352,7 @@ class Contentcore extends EventEmitter {
     opts = opts || {}
     const self = this
 
-    let missing = 1
+    let pending = 1
     let candidates = []
 
     this.expandSchemaName(name, (err, name) => {
@@ -391,7 +384,7 @@ class Contentcore extends EventEmitter {
 
     function getAll (path, cb) {
       self.sources(drives => {
-        missing = drives.length
+        pending = drives.length
         drives.forEach(drive => get(drive, path, cb))
       })
     }
@@ -400,7 +393,7 @@ class Contentcore extends EventEmitter {
       // TODO: This should be emitted once only.
       if (err) return cb(err)
       if (schema) candidates.push(schema)
-      if (--missing === 0) {
+      if (--pending === 0) {
         if (!candidates.length) return cb()
         if (candidates.length === 1) return cb(null, candidates[0])
         else return cb(null, reduce(candidates))

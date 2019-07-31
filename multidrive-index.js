@@ -18,6 +18,7 @@ class MultidriveIndex extends EventEmitter {
 
     this._states = {}
     this._indexes = new Map()
+    this._running = new Set()
 
     if (!opts.storeState && !opts.fetchState && !opts.clearIndex) {
     // In-memory storage implementation
@@ -53,7 +54,8 @@ class MultidriveIndex extends EventEmitter {
   }
 
   _source (drive) {
-    if (this._indexes.has(drive.key)) return
+    const key = drive.key.toString('hex')
+    if (this._indexes.has(key)) return
     const self = this
     const opts = {
       map,
@@ -63,13 +65,20 @@ class MultidriveIndex extends EventEmitter {
     }
 
     const index = hypertrieIndex(drive._db._trie, opts)
-    this._indexes.set(drive.key, index)
+    this._indexes.set(key, index)
 
     index.on('indexed', (nodes) => {
       if (nodes && nodes.length) {
         // console.log('multidrive-index indexed', this.name, nodes)
         this.emit('indexed', drive.key, nodes)
       }
+      this._running.delete(key)
+      if (!this._running.size) this.emit('indexed-all')
+    })
+
+    index.on('start', () => {
+      if (!this._running.size) this.emit('start')
+      this._running.add(key)
     })
 
     function map (msgs, done) {

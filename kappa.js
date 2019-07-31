@@ -12,6 +12,7 @@ function Kappa (opts) {
 
   this._logs = opts.multidrive
   this._indexes = {}
+  this._running = new Set()
 
   this.api = {}
 }
@@ -41,6 +42,16 @@ Kappa.prototype.use = function (name, version, view) {
     debug('kappa indexed', name, driveKey.toString('hex'))
     this.emit('indexed', name, batch, driveKey)
     if (view.indexed) view.indexed(batch, driveKey)
+  })
+
+  idx.on('indexed-all', () => {
+    this._running.delete(name)
+    if (!this._running.size) this.emit('indexed-all')
+  })
+
+  idx.on('start', () => {
+    if (!this._running.size) this.emit('start')
+    this._running.add(name)
   })
 
   // idx.on('error', function (err) {
