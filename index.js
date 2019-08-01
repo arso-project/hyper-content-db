@@ -203,6 +203,10 @@ class Contentcore extends EventEmitter {
   }
 
   put (schema, id, value, cb) {
+    // TODO: Make this the default and only support this form.
+    if (typeof schema === 'object') {
+      return this.put(schema.schema, schema.id, schema.value, id)
+    }
     // Schema names have to have exactly one slash.
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)

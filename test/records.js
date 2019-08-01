@@ -128,7 +128,7 @@ tape('batch and get stream', t => {
   const stream = store.createBatchStream()
   stream.write(records)
 
-  stream.on('data', data => console.log('batch result', data))
+  // stream.on('data', data => console.log('batch result', data))
 
   store.on('indexed-all', query)
 
