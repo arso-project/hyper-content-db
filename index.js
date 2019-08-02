@@ -2,7 +2,8 @@ const thunky = require('thunky')
 const p = require('path')
 const { EventEmitter } = require('events')
 const through = require('through2')
-const hyperid = require('hyperid')
+// const hyperid = require('hyperid')
+const shortid = require('shortid')
 const memdb = require('memdb')
 const sub = require('subleveldown')
 const levelBaseView = require('kappa-view')
@@ -426,7 +427,8 @@ class InvalidSchemaName extends Error {
   }
 }
 
-Contentcore.id = hyperid({ fixedLength: true, urlSafe: true })
+// Contentcore.id = hyperid({ fixedLength: true, urlSafe: true })
+Contentcore.id = () => shortid.generate()
 
 function makePath (schema, id) {
   return p.join(P_DATA, schema, id + '.json')
