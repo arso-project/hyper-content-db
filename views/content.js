@@ -19,7 +19,7 @@ function contentView (opts) {
           value = JSON.parse(msg.fileContent.toString())
         } catch (err) {
           // TODO: What to do with this error?
-          value = {}
+          value = msg.fileContent
         }
 
         msg = {

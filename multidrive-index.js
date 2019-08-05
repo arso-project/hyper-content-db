@@ -123,6 +123,7 @@ class MultidriveIndex extends EventEmitter {
   }
 
   _storeDriveState (key, state, cb) {
+    // console.log('store drive state', key, state)
     this._states[key.toString('hex')] = state
     let buf = this._encodeStates()
     this._storeState(buf, cb)
