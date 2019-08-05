@@ -5,6 +5,7 @@ const thunky = require('thunky')
 const StatEncoder = require('hyperdrive/lib/stat')
 const inspect = require('inspect-custom-symbol')
 const { EventEmitter } = require('events')
+const debug = require('debug')('multidrive-index')
 
 module.exports = (...args) => new MultidriveIndex(...args)
 
@@ -65,17 +66,24 @@ class MultidriveIndex extends EventEmitter {
       batchSize: this._opts.batchSize,
       prefix: this._opts.prefix,
       storeState: (state, cb) => this._storeDriveState(drive.key, state, cb),
-      fetchState: (cb) => this._fetchDriveState(drive.key, cb)
+      fetchState: (cb) => this._fetchDriveState(drive.key, cb),
+      // This should not really be needed, but the hypertrie
+      // logic does not directly comply to the interface expected
+      // by the codecs module. TODO: PR to hyperdrive.
+      valueEncoding: {
+        encode: stat => stat.encode(),
+        decode: StatEncoder.decode
+      },
+      transformNode: true
     }
     // console.log('create index', this.name, opts.batchSize)
 
-    console.log('mk', opts.prefix, opts.batchSize)
     const index = hypertrieIndex(drive._db._trie, opts)
     this._indexes.set(key, index)
 
     index.on('indexed', (nodes, complete) => {
       if (complete && nodes && nodes.length) {
-        // console.log('multidrive-index indexed', this.name, nodes)
+        debug('indexed', this.name, nodes.length, drive.key.toString('hex'))
         this.emit('indexed', drive.key, nodes)
         this._running.delete(key)
         if (!this._running.size) this.emit('indexed-all')
@@ -89,7 +97,6 @@ class MultidriveIndex extends EventEmitter {
 
     function map (msgs, done) {
       collect(msgs, finish, (msg, next) => {
-        msg = hypertrieIndex.transformNode(msg, StatEncoder)
         msg.source = drive.key
         overrideInspect(msg)
         if (self._readFile) {

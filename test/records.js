@@ -127,6 +127,7 @@ tape('batch and get stream', t => {
 
   const stream = store.createBatchStream()
   stream.write(records)
+  stream.end()
 
   // stream.on('data', data => console.log('batch result', data))
 

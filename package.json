@@ -1,6 +1,6 @@
 {
   "name": "content-store",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "hypercore-crypto": "^1.0.0",
     "hyperdrive": "^10.0.0-rc8",
     "hyperdrive-schemas": "^0.9.5",
-    "hypertrie-index": "^1.0.0",
+    "hypertrie-index": "^1.0.1",
     "inspect-custom-symbol": "^1.1.0",
     "kappa-view": "^3.0.0",
     "lodash": "^4.17.15",
