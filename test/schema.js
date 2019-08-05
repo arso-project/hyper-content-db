@@ -40,7 +40,7 @@ tape('schema view', t => {
 
   store1.batch(batch, (err, ids) => {
     t.error(err, 'batch')
-    store1.on('indexed', (name) => {
+    store1.on('indexed-all', (name) => {
       console.log('indexed', name)
       if (name === 'idx') query()
     })
@@ -49,7 +49,6 @@ tape('schema view', t => {
   function query () {
     if (_run) return
     _run = true
-    console.log('run q')
 
     const queries = [
       {

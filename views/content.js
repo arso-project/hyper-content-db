@@ -2,7 +2,8 @@ module.exports = contentView
 
 function contentView (opts) {
   const view = {
-    prefix: '.data',
+    ...opts,
+    prefix: '.data/',
     transformNodes: true,
     readFile: true,
     map (msgs, next) {
@@ -34,7 +35,8 @@ function contentView (opts) {
         return msg
       }).filter(m => m)
 
-      opts.map(msgs, finish)
+      if (msgs.length) opts.map(msgs, finish)
+      else finish()
 
       function finish (res) {
         next()
@@ -47,9 +49,7 @@ function contentView (opts) {
         //   next(null, ops)
         // }
       }
-    },
-    api: opts.api,
-    indexed: opts.indexed
+    }
   }
   return view
 }

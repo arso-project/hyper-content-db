@@ -223,6 +223,7 @@ class Contentcore extends EventEmitter {
           const buf = Buffer.from(JSON.stringify(value))
           drive.writeFile(path, buf, (err) => {
             if (err) return cb(err)
+            // console.log('> WRITTEN', id, value.title, drive._db._trie.version)
             cb(null, id)
           })
         })
@@ -435,6 +436,7 @@ function makePath (schema, id) {
 }
 
 function validSchemaName (schema) {
+  if (!schema || typeof schema !== 'string') return false
   return schema.match(/^[a-zA-Z0-9_\-./]*$/)
   // return schema.split('/').length === 2
 }

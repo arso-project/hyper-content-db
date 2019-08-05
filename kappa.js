@@ -26,14 +26,20 @@ Kappa.prototype.use = function (name, version, view) {
   }
   var idx = indexer({
     multidrive: this._logs,
+
+    name,
+
     prefix: view.prefix,
-    // version: version,
-    // maxBatch: view.maxBatch || 10,
-    // batch: view.map,
     map: view.map,
     readFile: view.readFile,
     fetchState: view.fetchState,
-    storeState: view.storeState
+    storeState: view.storeState,
+    batchSize: view.batchSize
+
+    // NOTE: kappa-core also has these.
+    // version: version,
+    // maxBatch: view.maxBatch || 10,
+    // batch: view.map,
   })
   idx.name = name
 

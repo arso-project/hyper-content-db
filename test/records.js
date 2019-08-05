@@ -27,7 +27,7 @@ tape('prefix', t => {
       drive.writeFile('foo', 'bar', (err) => {
         t.error(err, 'noerr writeFile')
         store1.put(schema, cstore.id(), record1, (err, id) => {
-          t.error(err, 'noerr put')
+          t.error(err, 'noerr put', id)
         })
       })
     })

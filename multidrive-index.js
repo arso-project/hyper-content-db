@@ -8,6 +8,8 @@ const { EventEmitter } = require('events')
 
 module.exports = (...args) => new MultidriveIndex(...args)
 
+let cnt = 0
+
 class MultidriveIndex extends EventEmitter {
   constructor (opts) {
     super()
@@ -15,6 +17,7 @@ class MultidriveIndex extends EventEmitter {
     this._opts = opts
     this._map = opts.map
     this._readFile = opts.readFile
+    this.name = opts.name || 'index' + cnt++
 
     this._states = {}
     this._indexes = new Map()
@@ -59,21 +62,24 @@ class MultidriveIndex extends EventEmitter {
     const self = this
     const opts = {
       map,
+      batchSize: this._opts.batchSize,
       prefix: this._opts.prefix,
       storeState: (state, cb) => this._storeDriveState(drive.key, state, cb),
       fetchState: (cb) => this._fetchDriveState(drive.key, cb)
     }
+    // console.log('create index', this.name, opts.batchSize)
 
+    console.log('mk', opts.prefix, opts.batchSize)
     const index = hypertrieIndex(drive._db._trie, opts)
     this._indexes.set(key, index)
 
-    index.on('indexed', (nodes) => {
-      if (nodes && nodes.length) {
+    index.on('indexed', (nodes, complete) => {
+      if (complete && nodes && nodes.length) {
         // console.log('multidrive-index indexed', this.name, nodes)
         this.emit('indexed', drive.key, nodes)
+        this._running.delete(key)
+        if (!this._running.size) this.emit('indexed-all')
       }
-      this._running.delete(key)
-      if (!this._running.size) this.emit('indexed-all')
     })
 
     index.on('start', () => {
@@ -101,7 +107,10 @@ class MultidriveIndex extends EventEmitter {
       function finish (err, msgs) {
         // todo: handle err better?
         if (err) self.emit('error', err)
-        self._map(msgs, done)
+        if (!msgs.length) return
+        self._map(msgs, () => {
+          done()
+        })
       }
     }
   }
