@@ -34,7 +34,7 @@ Kappa.prototype.use = function (name, version, view) {
     readFile: view.readFile,
     fetchState: view.fetchState,
     storeState: view.storeState,
-    batchSize: view.batchSize
+    batchSize: view.batchSize || 100
 
     // NOTE: kappa-core also has these.
     // version: version,
