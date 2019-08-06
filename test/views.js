@@ -20,7 +20,7 @@ function collectById (stream, cb) {
   stream.on('error', err => cb(err))
 }
 
-tape.skip('entities', t => {
+tape('entities', t => {
   const store1 = cstore(ram)
   const schema = 'arso.xyz/Entity'
   const schema2 = 'arso.xyz/Resource'
@@ -35,13 +35,15 @@ tape.skip('entities', t => {
   ]
 
   store1.batch(records, (err, ids) => {
-    t.error(err)
+    t.error(err, 'batch succeeded')
   })
 
-  let missing = 0
+  const step = stepper(err => {
+    t.error(err)
+    t.end()
+  })
 
-  store1.on('indexed', (batch, complete) => {
-    if (!complete) return
+  store1.on('indexed-all', () => {
     const ev = store1.api.entities
     step((done) => {
       const rs = ev.all()
@@ -61,7 +63,6 @@ tape.skip('entities', t => {
     step((done) => {
       const rs = ev.allWithSchema(schema2)
       collectById(rs, (err, rows) => {
-        console.log('rows', rows)
         t.error(err)
         t.equal(Object.keys(rows).length, 1, 'count for schema2 matches')
         t.equal(rows[ids[1]][0].schema, schema2, 'schema matches')
@@ -79,12 +80,20 @@ tape.skip('entities', t => {
       })
     })
   })
-
-  function step (fn) {
-    missing++
-    fn((err) => {
-      t.error(err)
-      if (--missing === 0) t.end()
-    })
-  }
 })
+
+function stepper (cb) {
+  let steps = []
+  return function step (fn) {
+    steps.push(fn)
+    if (steps.length === 1) process.nextTick(run)
+  }
+  function run () {
+    const fn = steps.shift()
+    fn(done)
+  }
+  function done (err) {
+    if (err) return cb(err)
+    process.nextTick(steps.length ? run : cb)
+  }
+}
