@@ -2,6 +2,7 @@ const thunky = require('thunky')
 const p = require('path')
 const { EventEmitter } = require('events')
 const through = require('through2')
+const LRU = require('lru-cache')
 // const hyperid = require('hyperid')
 const shortid = require('shortid')
 const memdb = require('memdb')
@@ -17,8 +18,11 @@ const schemaAwareView = require('./views/schema-aware')
 
 const { P_DATA, P_SCHEMA, P_SOURCES } = require('./constants')
 
+// const JSON_STRING = Symbol('json-buffer')
+
 module.exports = (...args) => new Contentcore(...args)
 module.exports.id = () => Contentcore.id()
+// module.exports.JSON_STRING = JSON_STRING
 
 class Contentcore extends EventEmitter {
   constructor (storage, key, opts) {
@@ -27,6 +31,11 @@ class Contentcore extends EventEmitter {
     this.multidrive = multidrive(storage, key, opts)
     this.kcore = kappa({ multidrive: this.multidrive })
     this.ready = thunky(this._ready.bind(this))
+
+    this.recordCache = new LRU({
+      max: opts.cacheSize || 16777216, // 16M
+      length: record => (record.stat && record.stat.size) || 256
+    })
 
     this.level = opts.level || memdb()
 
@@ -37,8 +46,10 @@ class Contentcore extends EventEmitter {
 
     this.id = Contentcore.id
 
-    this.useRecordView('entities', entitiesView)
-    this.useRecordView('indexes', schemaAwareView)
+    if (opts.defaultViews !== false) {
+      this.useRecordView('entities', entitiesView)
+      this.useRecordView('indexes', schemaAwareView)
+    }
   }
 
   useRecordView (name, makeView, opts) {
@@ -192,8 +203,10 @@ class Contentcore extends EventEmitter {
     const self = this
     return through.obj(function (msg, enc, next) {
       self.get(msg, opts, (err, record) => {
-        if (err) this.error(err)
-        else this.push(record)
+        if (err) {
+          console.error('ERROR', err)
+          this.emit('error', err)
+        } else this.push(record)
         next()
       })
     })
@@ -233,6 +246,7 @@ class Contentcore extends EventEmitter {
 
   get (req, opts, cb) {
     if (typeof opts === 'function') return this.get(req, null, opts)
+    const self = this
 
     opts = opts || {}
     const { id, schema, source, seq } = req
@@ -259,6 +273,13 @@ class Contentcore extends EventEmitter {
 
         const path = makePath(schema, id)
         const source = hex(drive.key)
+
+        const seq = req.seq || drive.version
+
+        const cacheKey = source + '@' + seq + '/' + path
+        const cachedRecord = self.recordCache.get(cacheKey)
+        if (cachedRecord) return cb(null, cachedRecord)
+
         const record = { source, id, schema }
 
         drive.stat(path, (err, stat) => {
@@ -268,10 +289,13 @@ class Contentcore extends EventEmitter {
           else record.stat = cleanStat(stat)
 
           drive.readFile(path, (err, buf) => {
-            if (err) return
+            if (err) return cb(err)
             try {
-              const value = JSON.parse(buf.toString())
+              const string = buf.toString()
+              const value = JSON.parse(string)
               record.value = value
+              // record.value[JSON_STRING] = string
+              self.recordCache.set(cacheKey, record)
               cb(null, record)
             } catch (err) {
               cb(err)
@@ -358,6 +382,8 @@ class Contentcore extends EventEmitter {
     opts = opts || {}
     const self = this
 
+    cb = once(cb)
+
     let pending = 1
     let candidates = []
 
@@ -372,12 +398,11 @@ class Contentcore extends EventEmitter {
 
     function get (drive, path, cb) {
       drive.readFile(path, (err, buf) => {
-        if (!err && buf.length) {
-          try {
-            const schema = JSON.parse(buf.toString())
-            cb(null, schema)
-          } catch (e) { cb(e) }
-        } else cb()
+        if (err || !buf.length) return cb()
+        try {
+          const schema = JSON.parse(buf.toString())
+          cb(null, schema)
+        } catch (err) { cb(err) }
       })
     }
 
@@ -396,7 +421,6 @@ class Contentcore extends EventEmitter {
     }
 
     function finish (err, schema) {
-      // TODO: This should be emitted once only.
       if (err) return cb(err)
       if (schema) candidates.push(schema)
       if (--pending === 0) {
@@ -408,15 +432,11 @@ class Contentcore extends EventEmitter {
 
     function reduce (schemas) {
       if (opts.reduce) return opts.reduce(schemas)
-
-      let winner
-      for (let schema of schemas) {
-        winner = winner || schema
-        if (schema.version && schema.version > winner.version) {
-          winner = schema
-        }
-      }
-      return winner
+      return schemas.reduce((winner, schema) => {
+        if (!winner || !winner.version) return schema
+        if (!schema.version) return winner
+        return schema.version > winner.version ? schema : winner
+      }, null)
     }
   }
 }
@@ -466,6 +486,15 @@ function mkdirp (fs, path, cb) {
 
 function cleanStat (stat) {
   return {
-    ctime: stat.ctime
+    ctime: stat.ctime,
+    size: stat.size
   }
+}
+
+function once (fn) {
+  let wrapper = (...args) => {
+    fn(...args)
+    wrapper = () => {}
+  }
+  return wrapper
 }
