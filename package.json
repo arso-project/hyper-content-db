@@ -11,10 +11,11 @@
   "license": "GPL-3.0",
   "dependencies": {
     "collect-stream": "^1.2.1",
+    "corestore": "^2.0.0",
     "duplexify": "^4.1.1",
     "end-of-stream": "^1.4.1",
     "hypercore-crypto": "^1.0.0",
-    "hyperdrive": "^10.0.0-rc8",
+    "hyperdrive": "^10.0.2",
     "hyperdrive-schemas": "^0.9.5",
     "hypertrie-index": "^1.0.3",
     "inspect-custom-symbol": "^1.1.0",
@@ -33,6 +34,7 @@
     "thunky": "^1.0.3"
   },
   "devDependencies": {
+    "corestore-swarm-networking": "^1.0.4",
     "random-access-memory": "^3.1.1",
     "tape": "^4.10.2"
   }

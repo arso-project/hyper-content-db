@@ -5,6 +5,7 @@ const crypto = require('hypercore-crypto')
 const thunky = require('thunky')
 const { EventEmitter } = require('events')
 const p = require('path')
+const corestore = require('corestore')
 
 module.exports = (...args) => new Multidrive(...args)
 
@@ -16,9 +17,11 @@ class Multidrive extends EventEmitter {
     opts = opts || {}
     this._opts = opts
 
-    this.storage = name => nestStorage(storage, name)
+    this.storage = typeof storage === 'string' ? raf(storage) : storage
 
-    this.primaryDrive = hyperdrive(this.storage('primary'), key, {
+    this.corestore = corestore(nestStorage(this.storage, 'corestore'))
+
+    this.primaryDrive = hyperdrive(this.corestore, key, {
       sparse: opts.sparse
     })
 
@@ -33,6 +36,7 @@ class Multidrive extends EventEmitter {
     this.primaryDrive.ready(err => {
       if (err) return cb(err)
       this.key = this.primaryDrive.key
+      this.discoveryKey = this.primaryDrive.discoveryKey
       this._pushSource(this.primaryDrive, cb)
     })
   }
@@ -46,7 +50,6 @@ class Multidrive extends EventEmitter {
       this.emit('source', drive)
 
       drive.readdir(P_SOURCES, (err, list) => {
-        // console.log('DRIVE READDIR', err, list)
         if (err || !list.length) return cb(err, drive)
         let missing = list.length
         for (let source of list) {
@@ -61,24 +64,23 @@ class Multidrive extends EventEmitter {
   }
 
   _addSource (key, opts, cb) {
-    // console.log('as', key, opts, cb)
-    if (typeof opts === 'function') return this._addSource(key, null, opts)
-
+    if (typeof opts === 'function') return this._addSource(key, {}, opts)
     opts = opts || {}
     opts.sparse = opts.sparse || this._opts.sparse
-
-    const drive = hyperdrive(this.storage(hex(key)), key, opts)
+    const drive = hyperdrive(this.corestore, key, opts)
     this._pushSource(drive, cb)
   }
 
   _writeSource (key, cb) {
     this.writer((err, drive) => {
       if (err) return cb(err)
-      drive.writeFile(p.join(P_SOURCES, hex(key)), Buffer.alloc(0), cb)
+      // drive.writeFile(p.join(P_SOURCES, hex(key)), Buffer.alloc(0), cb)
+      drive.mount(p.join(P_SOURCES, key), key, cb)
     })
   }
 
   addSource (key, cb) {
+    key = hex(key)
     this.ready(() => {
       if (this._sources.has(hex(key))) return cb(null, this._sources.get(key))
       this._addSource(key, cb)
@@ -86,10 +88,12 @@ class Multidrive extends EventEmitter {
   }
 
   hasSource (key) {
-    return this._sources.has(hex(key))
+    key = hex(key)
+    return this._sources.has(key)
   }
 
   saveSource (key, cb) {
+    key = hex(key)
     this.addSource(key, err => {
       if (err) return cb(err)
       this._writeSource(key, cb)
@@ -129,7 +133,7 @@ class Multidrive extends EventEmitter {
 
     function readKey () {
       if (self._localWriter) finish(null, self._localWriter)
-      let keystore = self.storage()('localwriter')
+      let keystore = self.storage('localwriter')
       keystore.stat((err, stat) => {
         if (err || !stat || !stat.length) createWriter(keystore)
         else {
@@ -162,32 +166,33 @@ class Multidrive extends EventEmitter {
   }
 
   replicate (opts) {
-    const self = this
-    if (!opts) opts = {}
+    return this.primaryDrive.replicate(opts)
+    // const self = this
+    // if (!opts) opts = {}
 
-    const stream = this.primaryDrive.replicate(opts)
+    // const stream = this.primaryDrive.replicate(opts)
 
-    for (let drive of this._sources.values()) {
-      addDrive(drive)
-    }
+    // for (let drive of this._sources.values()) {
+    //   addDrive(drive)
+    // }
 
-    this.on('source', drive => addDrive(drive))
+    // this.on('source', drive => addDrive(drive))
 
-    return stream
+    // return stream
 
-    function addDrive (drive) {
-      if (drive === self.primaryDrive) return
-      if (stream.destroyed) return
-      drive.replicate({
-        live: opts.live,
-        download: opts.download,
-        upload: opts.upload,
-        stream: stream
-      })
-      // Each hyperdrive has two feeds, so increase the amount
-      // of expected feeds.
-      // stream.expectedFeeds = stream.expectedFeeds + 2
-    }
+    // function addDrive (drive) {
+    //   if (drive === self.primaryDrive) return
+    //   if (stream.destroyed) return
+    //   drive.replicate({
+    //     live: opts.live,
+    //     download: opts.download,
+    //     upload: opts.upload,
+    //     stream: stream
+    //   })
+    //   // Each hyperdrive has two feeds, so increase the amount
+    //   // of expected feeds.
+    //   // stream.expectedFeeds = stream.expectedFeeds + 2
+    // }
   }
 }
 
@@ -201,8 +206,6 @@ function nestStorage (storage, prefix) {
   prefix = prefix || ''
   return function (name, opts) {
     let path = p.join(prefix, name)
-    // console.log('STORAGE', path, storage)
-    if (typeof storage === 'string') return raf(p.join(storage, path))
     return storage(path, opts)
   }
 }

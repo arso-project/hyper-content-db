@@ -34,43 +34,6 @@ tape('prefix', t => {
   })
 })
 
-// TODO: Fix replication.
-tape.skip('records', t => {
-  const store1 = cstore(ram)
-
-  const schema = 'arso.xyz/Entity'
-  const record1 = { title: 'world', tags: ['foo', 'bar'] }
-  const record2 = { title: 'moon', tags: ['bar', 'baz'] }
-
-  // This creates a record in each source with the same id.
-  store1.ready(() => {
-    const store2 = cstore(ram, store1.key)
-    store1.put(schema, cstore.id(), record1, (err, id1) => {
-      t.error(err, 'no err')
-      store2.put(schema, id1, record2, err => {
-        t.error(err, 'no err')
-        replicate(store1, store2, () => {
-          console.log('hi')
-          store2.getRecords(schema, id1, (err, records) => {
-            t.error(err, 'no err')
-            t.equal(records.length, 2)
-            t.equal(records[0].id, id1)
-            t.equal(records[1].id, id1)
-            t.equal(records[0].value.title, 'world')
-            t.equal(records[1].value.title, 'moon')
-            store2.listRecords(schema, (err, list) => {
-              t.error(err)
-              t.equal(list.length, 1)
-              t.equal(list[0], id1)
-              t.end()
-            })
-          })
-        })
-      })
-    })
-  })
-})
-
 tape('batch', t => {
   const store1 = cstore(ram)
   const schema = 'foo/bar'
@@ -149,8 +112,3 @@ tape('batch and get stream', t => {
     })
   }
 })
-
-function replicate (a, b, cb) {
-  var stream = a.replicate({ live: false })
-  stream.pipe(b.replicate()).pipe(stream).on('end', cb)
-}

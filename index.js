@@ -111,7 +111,7 @@ class Contentcore extends EventEmitter {
   }
 
   addSource (key, cb) {
-    this.multidrive.addSource(key, cb)
+    this.multidrive.saveSource(key, cb)
   }
 
   hasSource (key) {
@@ -236,7 +236,6 @@ class Contentcore extends EventEmitter {
           const buf = Buffer.from(JSON.stringify(value))
           drive.writeFile(path, buf, (err) => {
             if (err) return cb(err)
-            // console.log('> WRITTEN', id, value.title, drive._db._trie.version)
             cb(null, id)
           })
         })
@@ -257,9 +256,9 @@ class Contentcore extends EventEmitter {
         this.source(source, drive => load(drive, cb))
       } else {
         let pending = 0
+        let results = []
         this.sources(drives => drives.forEach(drive => {
           pending++
-          let results = []
           load(drive, (err, record) => {
             if (err) return cb(err)
             if (record) results.push(record)
@@ -487,6 +486,7 @@ function mkdirp (fs, path, cb) {
 function cleanStat (stat) {
   return {
     ctime: stat.ctime,
+    mtime: stat.mtime,
     size: stat.size
   }
 }
