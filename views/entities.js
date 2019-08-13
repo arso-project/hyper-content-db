@@ -1,10 +1,13 @@
 const { CHAR_END } = require('../constants')
 const through = require('through2')
 const pump = require('pump')
+const sub = require('subleveldown')
 
 module.exports = entityView
 
 function entityView (db) {
+  // const idSchema = sub(db, 'is')
+  // const schemaId = sub(db, 'si')
   return {
     map (msgs, next) {
       // console.log('ldb MSGS', msgs)
@@ -42,13 +45,27 @@ function entityView (db) {
           next()
         }))
       },
-      allWithSchema (kcore, schema) {
+      allWithSchema (kcore, opts) {
+        const schema = opts.schema
         let rs = db.createReadStream({
           gt: `si|${schema}|`,
           lt: `si|${schema}|` + CHAR_END
         })
         return rs.pipe(through.obj(function (row, enc, next) {
           let [schema, id] = row.key.split('|').slice(1)
+          let [source, seq] = row.value.split('@')
+          this.push({ id, schema, source, seq })
+          next()
+        }))
+      },
+      allWithId (kcore, opts) {
+        const id = opts.id
+        let rs = db.createReadStream({
+          gt: `is|${id}|`,
+          lt: `is|${id}|` + CHAR_END
+        })
+        return rs.pipe(through.obj(function (row, enc, next) {
+          let [id, schema] = row.key.split('|').slice(1)
           let [source, seq] = row.value.split('@')
           this.push({ id, schema, source, seq })
           next()

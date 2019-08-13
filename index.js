@@ -72,6 +72,7 @@ class Contentcore extends EventEmitter {
     this.multidrive.ready(err => {
       if (err) return cb(err)
       this.key = this.multidrive.key
+      this.discoveryKey = this.multidrive.discoveryKey
       cb(null)
     })
   }
@@ -111,6 +112,7 @@ class Contentcore extends EventEmitter {
   }
 
   addSource (key, cb) {
+    cb = cb || noop
     this.multidrive.saveSource(key, cb)
   }
 
@@ -137,6 +139,7 @@ class Contentcore extends EventEmitter {
 
       if (op === 'put') this.put(schema, id, value, finish)
       // else if (op === 'del') this.del(schema, id, finish)
+      else if (op === 'source') this.addSource(value)
       else if (op === 'schema') this.putSchema(schema, value, finish)
 
       // NOTE: Without process.nextTick this would break because
@@ -498,3 +501,5 @@ function once (fn) {
   }
   return wrapper
 }
+
+function noop () {}

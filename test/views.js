@@ -61,8 +61,9 @@ tape('entities', t => {
     })
 
     step((done) => {
-      const rs = ev.allWithSchema(schema2)
+      const rs = ev.allWithSchema({ schema: schema2 })
       collectById(rs, (err, rows) => {
+        console.log(rows)
         t.error(err)
         t.equal(Object.keys(rows).length, 1, 'count for schema2 matches')
         t.equal(rows[ids[1]][0].schema, schema2, 'schema matches')
@@ -71,7 +72,7 @@ tape('entities', t => {
     })
 
     step((done) => {
-      const rs = ev.allWithSchema(schema)
+      const rs = ev.allWithSchema({ schema })
       collectById(rs, (err, rows) => {
         t.error(err)
         t.equal(Object.keys(rows).length, 3, 'count for schema1 matches')

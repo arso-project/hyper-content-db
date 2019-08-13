@@ -2,7 +2,7 @@ const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
 
-tape.only('replication and sources', async t => {
+tape('replication and sources', async t => {
   const store1 = cstore(ram)
   var store2, id, store2localWriterKey
 

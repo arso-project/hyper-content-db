@@ -17,9 +17,15 @@ class Multidrive extends EventEmitter {
     opts = opts || {}
     this._opts = opts
 
-    this.storage = typeof storage === 'string' ? raf(storage) : storage
+    // this.storage = typeof storage === 'string' ? () => raf(storage) : storage
+    if (typeof storage === 'function') {
+      var factory = path => storage(path)
+    } else if (typeof storage === 'string') {
+      factory = path => raf(storage + '/' + path)
+    }
+    this.factory = factory
 
-    this.corestore = corestore(nestStorage(this.storage, 'corestore'))
+    this.corestore = corestore(factory)
 
     this.primaryDrive = hyperdrive(this.corestore, key, {
       sparse: opts.sparse
@@ -27,13 +33,12 @@ class Multidrive extends EventEmitter {
 
     this.ready = thunky(this._ready.bind(this))
 
-    this.writerLock = mutexify()
-
     this._sources = new Map()
   }
 
   _ready (cb) {
     this.primaryDrive.ready(err => {
+      console.log('primary drive', this.primaryDrive.key.toString('hex'))
       if (err) return cb(err)
       this.key = this.primaryDrive.key
       this.discoveryKey = this.primaryDrive.discoveryKey
@@ -67,15 +72,17 @@ class Multidrive extends EventEmitter {
     if (typeof opts === 'function') return this._addSource(key, {}, opts)
     opts = opts || {}
     opts.sparse = opts.sparse || this._opts.sparse
-    const drive = hyperdrive(this.corestore, key, opts)
+    key = hex(key)
+    const drive = hyperdrive(this.corestore, Buffer.from(key, 'hex'), opts)
     this._pushSource(drive, cb)
   }
 
   _writeSource (key, cb) {
+    key = hex(key)
     this.writer((err, drive) => {
       if (err) return cb(err)
       // drive.writeFile(p.join(P_SOURCES, hex(key)), Buffer.alloc(0), cb)
-      drive.mount(p.join(P_SOURCES, key), key, cb)
+      drive.mount(p.join(P_SOURCES, key), Buffer.from(key, 'hex'), cb)
     })
   }
 
@@ -133,12 +140,14 @@ class Multidrive extends EventEmitter {
 
     function readKey () {
       if (self._localWriter) finish(null, self._localWriter)
-      let keystore = self.storage('localwriter')
+      let keystore = self.factory('localwriter')
       keystore.stat((err, stat) => {
-        if (err || !stat || !stat.length) createWriter(keystore)
+        console.log('read keystore', stat)
+        if (err || !stat || !stat.size) createWriter(keystore)
         else {
-          keystore.read(0, 32, (err, key) => {
+          keystore.read(0, 64, (err, key) => {
             if (err) return finish(err)
+            key = Buffer.from(key.toString(), 'hex')
             openWriter({ publicKey: key })
           })
         }
@@ -147,7 +156,8 @@ class Multidrive extends EventEmitter {
 
     function createWriter (keystore) {
       const keyPair = crypto.keyPair()
-      keystore.write(0, keyPair.publicKey, err => {
+      const localKey = Buffer.from(keyPair.publicKey.toString('hex'))
+      keystore.write(0, localKey, err => {
         if (err) return cb(err)
         openWriter(keyPair)
       })
