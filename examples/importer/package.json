@@ -36,5 +36,8 @@
 				"remark-stringify": "6.0.4",
 				"sonar": "github:Frando/sonar#master",
 				"unified": "7.1.0"
+		},
+		"devDependencies": {
+				"@hyperswarm/replicator": "^1.1.0"
 		}
 }

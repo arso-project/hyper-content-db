@@ -4,6 +4,9 @@ const sonarView = require('./views/sonar')
 const leveldb = require('level')
 const p = require('path')
 const mkdirp = require('mkdirp')
+const util = require('util')
+
+const replicate = require('@hyperswarm/replicator')
 
 module.exports = (...args) => new Importer(...args)
 
@@ -24,8 +27,20 @@ class Importer {
     Object.values(paths).forEach(p => mkdirp.sync(p))
 
     this.level = leveldb(paths.level, 'level')
-    this.cstore = cstore(paths.corestore, this._opts.key, { level: this.level })
+    this.cstore = cstore(paths.corestore, this._opts.key, { level: this.level, sparse: false })
     this.cstore.useRecordView('sonar', sonarView, { storage: paths.sonar })
+
+    this.swarm = replicate(this.cstore, {
+      live: true,
+      announce: true,
+      lookup: true
+    })
+
+    this.swarm.on('join', dkey => console.log('Joining swarm for %s', dkey.toString('hex')))
+
+    console.log('here')
+
+    logEvents(this.swarm, 'swarm')
 
     this.cstore.writer((err, drive) => {
       const key = hex(this.cstore.key)
@@ -81,4 +96,16 @@ class Importer {
 
 function hex (key) {
   return Buffer.isBuffer(key) ? key.toString('hex') : key
+}
+
+function logEvents (emitter, name) {
+  let emit = emitter.emit
+  emitter.emit = (...args) => {
+    // const params = args.slice(1).map(arg => {
+    //   util.inspect(arg, { depth: 0 })
+    // })
+    const params = util.inspect(args.slice(1), { depth: 0 })
+    console.log('(%s) %s %o', name, args[0], params)
+    emit.apply(emitter, args)
+  }
 }

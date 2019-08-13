@@ -165,9 +165,9 @@ class Importer {
     this.files[path] = { value, metadata }
   }
 
-  addDerivedFile (path, body) {
-    this.derivedFiles[path] = body
-  }
+  // addDerivedFile (path, body) {
+  //   this.derivedFiles[path] = body
+  // }
 
   addRecord (schema, value) {
     this.records.push({ schema, value })
@@ -187,7 +187,7 @@ function urlToFilename (url, opts) {
   let parsed = u.parse(url)
   let PREFIX = '/_import'
   // todo: how to handle GET params?
-  let prefix = opts.prefix || ''
+  let prefix = opts.prefix || 'source'
   let pathname = parsed.pathname
   if (opts.hash && pathname.length > 30) {
     const ext = p.extname(pathname)
@@ -195,6 +195,14 @@ function urlToFilename (url, opts) {
   }
   let path = p.join(PREFIX, prefix, parsed.hostname, pathname)
   return path
+}
+
+function urlToHtmlFile (url, opts) {
+  let filepath = urlToFilename(url, opts)
+  if (filepath.substring(-1).charAt(0) === '/') {
+    filepath = p.join(filepath, 'index.html')
+  }
+  return filepath
 }
 
 function blobToFilename (buf, url) {
@@ -210,16 +218,36 @@ async function download (job, next) {
   let url = job.url
   // let drive = job.api.hyperdrive
 
+  let filepath = urlToHtmlFile(job.url)
+
   debug('fetch', url)
   let response = await ky(url)
-  let text = await response.text()
+  let html = await response.text()
+
+  let headers = {}
+  for (let [key, value] of response.headers) {
+    headers[key] = value
+  }
+
+  const metadata = { headers }
 
   // drive.writeFile(filepath, text)
-  job.addResource('html', text)
+  job.addResource('html', html)
 
   // job.addFile(filepath, text)
+  job.addFile(filepath, html, metadata)
+  job.addRecord('file', {
+    path: filepath,
+    mimetype: 'text/html',
+    type: 'source',
+    origin: {
+      type: 'http',
+      headers,
+      url
+    }
+  })
 
-  const dom = new jsdom.JSDOM(text, { url })
+  const dom = new jsdom.JSDOM(html, { url })
   job.addResource('dom', dom)
   next()
 }
@@ -241,14 +269,10 @@ async function freeze (job, next) {
   }
 
   // job.addResource('html-clean', html)
-  let filepath = urlToFilename(job.url)
-  // if (!filepath.match(/\.html?$/)) {
-  if (filepath.substring(-1).charAt(0) === '/') {
-    filepath = p.join(filepath, 'index.html')
-  }
-  console.log('addFile', filepath)
+  let filepath = urlToHtmlFile(job.url, { prefix: 'freeze-dry' })
+
   job.addFile(filepath, html)
-  job.addRecord('file', { path: filepath, mimetype: 'text/html' })
+  job.addRecord('file', { path: filepath, mimetype: 'text/html', type: 'freeze-dry', dangerous: false })
 
   job.baseFilePath = filepath
 
@@ -260,9 +284,11 @@ async function freeze (job, next) {
     // const filename = urlToFilename(url, opts)
     try {
       const response = await ky(url, opts)
+      job.log(`Fetched ${url}: ${response.status} ${response.statusText}`)
       return response
     } catch (err) {
-      console.error('ERROR FETCHING', url, err)
+      let response = err.reponse
+      job.error(`Could not fetch ${url}: ${response.status} ${response.statusText}`)
       return url
     }
     // return ky(...args)
@@ -275,7 +301,7 @@ async function freeze (job, next) {
     if (!blob) return null
     let metadata = {}
     if (blob.type) {
-      metadata.headers = Buffer.from(JSON.stringify({ 'content-type': blob.type }))
+      metadata.headers = { 'content-type': blob.type }
     }
     const buf = blob.toBuffer()
     const filename = blobToFilename(buf, link.resource.url)
@@ -333,7 +359,6 @@ function readable (job, next) {
   const content = `# ${article.title}\n\n${md}`
   // job.addDerivedFile('readable.md', content)
   const record = { ...article, content }
-  console.log('READABLE', record)
   job.addRecord('readable', record)
   next()
 }
@@ -364,15 +389,23 @@ function _saveRecords (job, next) {
 }
 
 function _saveFiles (job, drive, next) {
-  const basename = job.baseFilePath || urlToFilename(job.url)
+  // const basename = job.baseFilePath || urlToFilename(job.url)
 
   let missing = 0
 
-  for (let [filename, { value, metadata }] of Object.entries(job.files)) {
+  for (let [filename, file] of Object.entries(job.files)) {
+    let { metadata = {}, value } = file
     if (typeof value === 'string') value = Buffer.from(value, 'utf8')
-    if (!value) {
-      job.error('No value set for file', filename)
+    if (!value || !Buffer.isBuffer(value)) {
+      job.error('Invalid file content', filename)
+      console.error('Invalid file content', value)
       continue
+    }
+
+    metadata.id = job.id
+
+    for (let key of Object.keys(metadata)) {
+      metadata[key] = Buffer.from(JSON.stringify(metadata[key]))
     }
 
     if (!filename.startsWith('/')) filename = '/' + filename
@@ -382,33 +415,34 @@ function _saveFiles (job, drive, next) {
     mkdirp(p.dirname(filename), { fs: drive }, (err, cb) => {
       if (err && err.code !== 'EEXIST') return cb(err)
       drive.writeFile(filename, value, { metadata }, err => {
+        if (err) console.error('ERROR WRITING', filename, value, metadata)
         let msg = 'Written file: ' + filename
         done(err, msg)
       })
     })
   }
 
-  for (let [filename, content] of Object.entries(job.derivedFiles)) {
-    // if (typeof content === 'string') content = Buffer.from(content, 'utf8')
-    if (typeof content === 'string') {
-      content = Buffer.from(content)
-    }
-    if (!content) {
-      job.error('No content set for file', filename)
-      continue
-    }
-    let path = p.join('/_import/DERIVED', filename)
+  // for (let [filename, content] of Object.entries(job.derivedFiles)) {
+  //   // if (typeof content === 'string') content = Buffer.from(content, 'utf8')
+  //   if (typeof content === 'string') {
+  //     content = Buffer.from(content)
+  //   }
+  //   if (!content) {
+  //     job.error('No content set for file', filename)
+  //     continue
+  //   }
+  //   let path = p.join('/_import/DERIVED', filename)
 
-    if (!path.startsWith('/')) filename = '/' + filename
+  //   if (!path.startsWith('/')) filename = '/' + filename
 
-    missing++
-    mkdirp(p.dirname(path), { fs: drive }, (err, cb) => {
-      if (err && err.code !== 'EEXIST') return cb(err)
-      drive.writeFile(path, content, (err) => {
-        done(err, 'Written derived file: ' + path)
-      })
-    })
-  }
+  //   missing++
+  //   mkdirp(p.dirname(path), { fs: drive }, (err, cb) => {
+  //     if (err && err.code !== 'EEXIST') return cb(err)
+  //     drive.writeFile(path, content, (err) => {
+  //       done(err, 'Written derived file: ' + path)
+  //     })
+  //   })
+  // }
 
   if (!missing) done()
 

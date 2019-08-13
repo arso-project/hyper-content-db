@@ -75,8 +75,10 @@ function add (args, opts, cb) {
 
 function serve (args, opts, cb) {
   const importer = open(opts)
-  const cstore = importer.cstore
-  require('./serve')(cstore)
+  importer.ready(() => {
+    const cstore = importer.cstore
+    require('./serve')(cstore)
+  })
 }
 
 function mirror (args, opts, cb) {
