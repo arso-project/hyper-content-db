@@ -38,7 +38,7 @@ class Multidrive extends EventEmitter {
 
   _ready (cb) {
     this.primaryDrive.ready(err => {
-      console.log('primary drive', this.primaryDrive.key.toString('hex'))
+      // console.log('primary drive', this.primaryDrive.key.toString('hex'))
       if (err) return cb(err)
       this.key = this.primaryDrive.key
       this.discoveryKey = this.primaryDrive.discoveryKey
@@ -120,58 +120,58 @@ class Multidrive extends EventEmitter {
     })
   }
 
+  get localKey () {
+    if (!this._localWriter || !this._localWriter.key) return undefined
+    return this._localWriter.key
+  }
+
   writer (cb) {
     const self = this
     if (this._localWriter) return cb(null, this._localWriter)
-    let release = null
-    this.ready(err => {
-      if (err) return cb(err)
-      if (this.primaryDrive.writable) {
-        finish(null, this.primaryDrive)
-      } else {
-        readKey()
-        // TODO: Re-enable writer lock.
-        // self.writerLock(_release => {
-        //   release = _release
-        //   readKey()
-        // })
-      }
-    })
+    if (!this._loadLocalWriter) this._loadLocalWriter = thunky(loadWriter)
+    this._loadLocalWriter(err => cb(err, this._localWriter))
 
-    function readKey () {
-      if (self._localWriter) finish(null, self._localWriter)
-      let keystore = self.factory('localwriter')
-      keystore.stat((err, stat) => {
-        console.log('read keystore', stat)
-        if (err || !stat || !stat.size) createWriter(keystore)
-        else {
-          keystore.read(0, 64, (err, key) => {
-            if (err) return finish(err)
-            key = Buffer.from(key.toString(), 'hex')
-            openWriter({ publicKey: key })
-          })
+    function loadWriter (cb) {
+      self.ready(err => {
+        if (err) return cb(err)
+        if (self.primaryDrive.writable) {
+          finish(null, self.primaryDrive)
+        } else {
+          readKey()
         }
       })
-    }
 
-    function createWriter (keystore) {
-      const keyPair = crypto.keyPair()
-      const localKey = Buffer.from(keyPair.publicKey.toString('hex'))
-      keystore.write(0, localKey, err => {
+      function readKey () {
+        if (self._localWriter) finish(null, self._localWriter)
+        let keystore = self.factory('localwriter')
+        keystore.stat((err, stat) => {
+          if (err || !stat || !stat.size) return createWriter(keystore)
+          keystore.read(0, 64, (err, hexKey) => {
+            if (err) return finish(err)
+            const key = Buffer.from(hexKey.toString(), 'hex')
+            openWriter(key)
+          })
+        })
+      }
+
+      function createWriter (keystore) {
+        const { publicKey, secretKey } = crypto.keyPair()
+        const hexKey = Buffer.from(publicKey.toString('hex'))
+        keystore.write(0, hexKey, err => {
+          if (err) return cb(err)
+          openWriter(publicKey, { secretKey })
+        })
+      }
+
+      function openWriter (key, opts) {
+        self._addSource(key, opts, finish)
+      }
+
+      function finish (err, drive) {
         if (err) return cb(err)
-        openWriter(keyPair)
-      })
-    }
-
-    function openWriter (keyPair) {
-      const { publicKey, secretKey } = keyPair
-      self._addSource(publicKey, { secretKey }, finish)
-    }
-
-    function finish (err, drive) {
-      self._localWriter = drive
-      if (release) release()
-      cb(err, drive)
+        self._localWriter = drive
+        cb()
+      }
     }
   }
 

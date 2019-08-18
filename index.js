@@ -28,9 +28,13 @@ class Contentcore extends EventEmitter {
   constructor (storage, key, opts) {
     super()
     opts = opts || {}
+
     this.multidrive = multidrive(storage, key, opts)
-    this.kcore = kappa({ multidrive: this.multidrive })
-    this.ready = thunky(this._ready.bind(this))
+
+    this.kcore = kappa({
+      multidrive: this.multidrive,
+      viewContext: this
+    })
 
     this.recordCache = new LRU({
       max: opts.cacheSize || 16777216, // 16M
@@ -50,6 +54,8 @@ class Contentcore extends EventEmitter {
       this.useRecordView('entities', entitiesView)
       this.useRecordView('indexes', schemaAwareView)
     }
+
+    this.ready = thunky(this._ready.bind(this))
   }
 
   useRecordView (name, makeView, opts) {
@@ -73,11 +79,13 @@ class Contentcore extends EventEmitter {
       if (err) return cb(err)
       this.key = this.multidrive.key
       this.discoveryKey = this.multidrive.discoveryKey
-      cb(null)
+      // TODO: Always wait for a writer?
+      this.multidrive.writer(() => cb())
     })
   }
 
   _initWriter (cb) {
+    this._writerReady = true
     this.multidrive.writer((err, writer) => {
       if (err) return cb(err)
       // TODO: Don't do this on every start?
@@ -107,6 +115,10 @@ class Contentcore extends EventEmitter {
     })
   }
 
+  get localKey () {
+    return this.multidrive.localKey
+  }
+
   replicate (opts) {
     return this.multidrive.replicate(opts)
   }
@@ -129,19 +141,19 @@ class Contentcore extends EventEmitter {
   }
 
   batch (msgs, cb) {
+    cb = cb || noop
     const results = []
     const errors = []
-    let pending = 0
+
+    let pending = msgs.length
 
     for (let msg of msgs) {
-      pending++
-      const { op, schema, id, value } = msg
+      const { op = 'put', schema, id, value } = msg
 
       if (op === 'put') this.put(schema, id, value, finish)
-      // else if (op === 'del') this.del(schema, id, finish)
+      else if (op === 'del') this.del(schema, id, finish)
       else if (op === 'source') this.addSource(value)
       else if (op === 'schema') this.putSchema(schema, value, finish)
-
       // NOTE: Without process.nextTick this would break because
       // pending would not fullyincrease before finishing.
       else process.nextTick(finish)
@@ -209,7 +221,9 @@ class Contentcore extends EventEmitter {
         if (err) {
           console.error('ERROR', err)
           this.emit('error', err)
-        } else this.push(record)
+        } else if (record) {
+          this.push(record)
+        }
         next()
       })
     })
@@ -249,25 +263,46 @@ class Contentcore extends EventEmitter {
   get (req, opts, cb) {
     if (typeof opts === 'function') return this.get(req, null, opts)
     const self = this
-
     opts = opts || {}
+
     const { id, schema, source, seq } = req
+
+    if (seq && !source) return cb(new Error('Invalid request: seq without source'))
+
+    if (opts.reduce === true) opts.reduce = defaultReduce
 
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
+      let pending
+      let records = []
+
       if (source) {
         this.source(source, drive => load(drive, cb))
       } else {
-        let pending = 0
-        let results = []
-        this.sources(drives => drives.forEach(drive => {
-          pending++
-          load(drive, (err, record) => {
-            if (err) return cb(err)
-            if (record) results.push(record)
-            if (--pending === 0) cb(null, results)
-          })
-        }))
+        this.sources(drives => {
+          pending = drives.length
+          drives.forEach(drive => load(drive, onrecord))
+        })
+      }
+
+      function onrecord (err, record) {
+        // Skip not found errors.
+        if (err && err.code !== 'ENOENT') return cb(err)
+        if (record) records.push(record)
+        if (--pending === 0) {
+          if (opts.reduce) {
+            let result
+            let sources = []
+            for (let record of records) {
+              if (!result) result = record
+              else result = opts.reduce(result, record)
+              sources.push(record.source)
+            }
+            result.alternatives = records.filter(r => r !== result)
+            records = result
+          }
+          cb(null, records)
+        }
       }
 
       function load (drive, cb) {
@@ -276,19 +311,24 @@ class Contentcore extends EventEmitter {
         const path = makePath(schema, id)
         const source = hex(drive.key)
 
-        const seq = req.seq || drive.version
+        const cacheSeq = seq || drive.version
 
-        const cacheKey = source + '@' + seq + '/' + path
+        const cacheKey = `${source}@${cacheSeq}/${path}`
         const cachedRecord = self.recordCache.get(cacheKey)
         if (cachedRecord) return cb(null, cachedRecord)
 
         const record = { source, id, schema }
 
-        drive.stat(path, (err, stat) => {
-          if (err) return cb(null)
+        // TODO: Find out why seq has to be incremented by one.
+        // If doing drive.checkout(seq), the files are not found.
+        if (seq) drive = drive.checkout(Math.min(seq + 1, drive.version))
+
+        drive.stat(path, (err, stat, trie) => {
+          if (err) return cb(err)
 
           if (opts.fullStat) record.stat = stat
-          else record.stat = cleanStat(stat)
+
+          record.meta = cleanStat(stat)
 
           drive.readFile(path, (err, buf) => {
             if (err) return cb(err)
@@ -296,7 +336,6 @@ class Contentcore extends EventEmitter {
               const string = buf.toString()
               const value = JSON.parse(string)
               record.value = value
-              // record.value[JSON_STRING] = string
               self.recordCache.set(cacheKey, record)
               cb(null, record)
             } catch (err) {
@@ -306,21 +345,25 @@ class Contentcore extends EventEmitter {
         })
       }
     })
+
+    function defaultReduce (a, b) {
+      return a.meta.mtime > b.meta.mtime ? a : b
+    }
   }
 
   getRecords (schema, id, cb) {
     return this.get({ schema, id }, cb)
   }
 
-  listRecords (schema, cb) {
+  list (schema, cb) {
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
-      let ids = []
-      let pending = 0
+      let ids = new Set()
+      let pending
       this.sources(drives => {
+        pending = drives.length
         drives.forEach(drive => {
           let path = p.join(P_DATA, schema)
-          pending++
           drive.readdir(path, (err, list) => {
             if (err) return finish(err)
             if (!list.length) return finish()
@@ -332,9 +375,9 @@ class Contentcore extends EventEmitter {
 
       function finish (err, list) {
         if (!err && list) {
-          ids = [...ids, ...list]
+          list.forEach(id => ids.add(id))
         }
-        if (--pending === 0) cb(null, list)
+        if (--pending === 0) cb(null, Array.from(ids))
       }
     })
   }
@@ -490,7 +533,8 @@ function cleanStat (stat) {
   return {
     ctime: stat.ctime,
     mtime: stat.mtime,
-    size: stat.size
+    size: stat.size,
+    seq: stat.seq
   }
 }
 

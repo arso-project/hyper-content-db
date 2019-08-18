@@ -1,6 +1,7 @@
 const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
+const { stepper } = require('./lib/util')
 
 // function collect (stream, cb) {
 //   let buf = []
@@ -63,7 +64,7 @@ tape('entities', t => {
     step((done) => {
       const rs = ev.allWithSchema({ schema: schema2 })
       collectById(rs, (err, rows) => {
-        console.log(rows)
+        // console.log(rows)
         t.error(err)
         t.equal(Object.keys(rows).length, 1, 'count for schema2 matches')
         t.equal(rows[ids[1]][0].schema, schema2, 'schema matches')
@@ -82,19 +83,3 @@ tape('entities', t => {
     })
   })
 })
-
-function stepper (cb) {
-  let steps = []
-  return function step (fn) {
-    steps.push(fn)
-    if (steps.length === 1) process.nextTick(run)
-  }
-  function run () {
-    const fn = steps.shift()
-    fn(done)
-  }
-  function done (err) {
-    if (err) return cb(err)
-    process.nextTick(steps.length ? run : cb)
-  }
-}

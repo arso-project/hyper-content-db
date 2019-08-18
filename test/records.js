@@ -45,11 +45,11 @@ tape('batch', t => {
   store1.batch(records, (err, ids) => {
     t.error(err)
     t.equal(ids.length, 3)
-    store1.listRecords(schema, (err, ids) => {
+    store1.list(schema, (err, ids) => {
       t.error(err)
       t.equal(ids.length, 3)
       let data = []
-      ids.forEach(id => store1.getRecords(schema, id, collect))
+      ids.forEach(id => store1.get({ schema, id }, collect))
       function collect (err, records) {
         if (err) t.error(err)
         data = [...data, ...records]
@@ -100,10 +100,13 @@ tape('batch and get stream', t => {
 
   function query () {
     const queryStream = store.api.entities.all()
+    // queryStream.on('data', d => console.log('QUERYRES', d))
     const getTransform = store.createGetStream()
     const resultStream = queryStream.pipe(getTransform)
+    // resultStream.on('data', d => console.log('GETREC', d))
     collect(resultStream, (err, data) => {
       t.error(err)
+      // console.log('DATA', data)
       data = L.orderBy(data, r => r.value.title)
       t.equal(data.length, 2)
       t.equal(data[0].value.title, 'Party')

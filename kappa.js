@@ -14,6 +14,8 @@ function Kappa (opts) {
   this._indexes = {}
   this._running = new Set()
 
+  this._viewContext = opts.viewContext || this
+
   this.api = {}
 }
 
@@ -63,11 +65,12 @@ Kappa.prototype.use = function (name, version, view) {
   //   self.emit('error', err)
   // })
   // if (view.indexed) idx.on('indexed', view.indexed)
+  const context = this._viewContext
   this._indexes[name] = idx
   this.api[name] = {}
   this.api[name].ready = idx.ready.bind(idx)
   for (var key in view.api) {
-    if (typeof view.api[key] === 'function') this.api[name][key] = view.api[key].bind(idx, this)
+    if (typeof view.api[key] === 'function') this.api[name][key] = view.api[key].bind(view.api, context)
     else this.api[name][key] = view.api[key]
   }
 }
