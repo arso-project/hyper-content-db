@@ -91,6 +91,13 @@ tape('batch and get stream', t => {
   const stream = store.createBatchStream()
   stream.write(records)
   stream.end()
+  collect(stream, (err, ids) => {
+    t.error(err)
+    t.equal(ids.length, 2, 'got two ids back')
+    for (let id of ids) {
+      t.equal(typeof id, 'string')
+    }
+  })
 
   // stream.on('data', data => console.log('batch result', data))
 

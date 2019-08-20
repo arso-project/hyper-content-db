@@ -219,10 +219,13 @@ class Contentcore extends EventEmitter {
     return through.obj(function (msg, enc, next) {
       self.get(msg, opts, (err, record) => {
         if (err) {
-          console.error('ERROR', err)
           this.emit('error', err)
         } else if (record) {
-          this.push(record)
+          if (Array.isArray(record)) {
+            record.forEach(record => this.push(record))
+          } else {
+            this.push(record)
+          }
         }
         next()
       })
@@ -294,11 +297,15 @@ class Contentcore extends EventEmitter {
         if (--pending === 0) {
           let result
           if (opts.reduce) {
-            result = records.reduce((result, record) => {
-              if (!result) return record
-              else return opts.reduce(result, record)
-            }, null)
-            result.alternatives = records.filter(r => r.source !== result.source)
+            if (records.length === 1) {
+              result = records[0]
+            } else {
+              result = records.reduce((result, record) => {
+                if (!result) return record
+                else return opts.reduce(result, record)
+              }, null)
+              result.alternatives = records.filter(r => r.source !== result.source)
+            }
           } else {
             result = records
           }
