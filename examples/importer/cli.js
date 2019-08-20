@@ -124,7 +124,7 @@ function show (args, opts, cb) {
         for (let [id, rows] of Object.entries(list)) {
           for (let row of rows) {
             missing++
-            store.getRecords(row.schema, id, (err, record) => {
+            store.get({ schema: row.schema, id }, (err, record) => {
               records.push(record)
               if (--missing === 0) {
                 let flat = records.reduce((agg, rows) => ([...agg, ...rows]), [])

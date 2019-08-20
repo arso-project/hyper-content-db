@@ -238,7 +238,7 @@ class Contentcore extends EventEmitter {
     if (typeof schema === 'object') {
       return this.put(schema.schema, schema.id, schema.value, id)
     }
-    // Schema names have to have exactly one slash.
+
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
       this.writer((err, drive) => {
@@ -263,6 +263,7 @@ class Contentcore extends EventEmitter {
   get (req, opts, cb) {
     if (typeof opts === 'function') return this.get(req, null, opts)
     const self = this
+    cb = once(cb)
     opts = opts || {}
 
     const { id, schema, source, seq } = req
@@ -277,7 +278,8 @@ class Contentcore extends EventEmitter {
       let records = []
 
       if (source) {
-        this.source(source, drive => load(drive, cb))
+        pending = 1
+        this.source(source, drive => load(drive, onrecord))
       } else {
         this.sources(drives => {
           pending = drives.length
@@ -290,18 +292,17 @@ class Contentcore extends EventEmitter {
         if (err && err.code !== 'ENOENT') return cb(err)
         if (record) records.push(record)
         if (--pending === 0) {
+          let result
           if (opts.reduce) {
-            let result
-            let sources = []
-            for (let record of records) {
-              if (!result) result = record
-              else result = opts.reduce(result, record)
-              sources.push(record.source)
-            }
-            result.alternatives = records.filter(r => r !== result)
-            records = result
+            result = records.reduce((result, record) => {
+              if (!result) return record
+              else return opts.reduce(result, record)
+            }, null)
+            result.alternatives = records.filter(r => r.source !== result.source)
+          } else {
+            result = records
           }
-          cb(null, records)
+          cb(null, result)
         }
       }
 
@@ -312,7 +313,6 @@ class Contentcore extends EventEmitter {
         const source = hex(drive.key)
 
         const cacheSeq = seq || drive.version
-
         const cacheKey = `${source}@${cacheSeq}/${path}`
         const cachedRecord = self.recordCache.get(cacheKey)
         if (cachedRecord) return cb(null, cachedRecord)
@@ -351,10 +351,7 @@ class Contentcore extends EventEmitter {
     }
   }
 
-  getRecords (schema, id, cb) {
-    return this.get({ schema, id }, cb)
-  }
-
+  // TODO: This should likely be streaming.
   list (schema, cb) {
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
