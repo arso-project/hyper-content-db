@@ -9,14 +9,14 @@ const memdb = require('memdb')
 const sub = require('subleveldown')
 const levelBaseView = require('kappa-view')
 
-const multidrive = require('./multidrive')
-const kappa = require('./kappa')
+const multidrive = require('./lib/multidrive')
+const kappa = require('./lib/kappa')
 
 const entitiesView = require('./views/entities')
 const contentView = require('./views/content')
 const schemaAwareView = require('./views/schema-aware')
 
-const { P_DATA, P_SCHEMA, P_SOURCES } = require('./constants')
+const { P_DATA, P_SCHEMA, P_SOURCES } = require('./lib/constants')
 
 // const JSON_STRING = Symbol('json-buffer')
 

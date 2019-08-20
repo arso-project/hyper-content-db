@@ -1,4 +1,4 @@
-const { CHAR_END } = require('../constants')
+const { CHAR_END } = require('../lib/constants')
 const through = require('through2')
 const pump = require('pump')
 const sub = require('subleveldown')

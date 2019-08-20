@@ -1,6 +1,6 @@
 const { Transform } = require('stream')
 
-const { CHAR_END, CHAR_SPLIT, CHAR_START } = require('../constants')
+const { CHAR_END, CHAR_SPLIT, CHAR_START } = require('../lib/constants')
 
 module.exports = schemaView
 
