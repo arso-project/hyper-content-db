@@ -2,6 +2,10 @@
 
 A [Kappa-style](http://kappa-architecture.com) peer-to-peer content database, on top of hyperdrives.
 
+## Installation
+
+#### `npm install hyper-content-db`
+
 ## Example
 
 ```javascript
