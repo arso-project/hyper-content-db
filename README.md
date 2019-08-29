@@ -68,7 +68,9 @@ function replicate (a, b) {
 
 ## API
 
-#### `const db = islands(storage, key, opts)`
+`const hypercontent = require('hyper-content-db')`
+
+#### `const db = hypercontent(storage, key, opts)`
 
 `storage` is either a string to a file system path or a [random-access-storage](https://github.com/random-access-storage/) instance.
 
