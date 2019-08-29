@@ -1,15 +1,70 @@
-# 🐙 barcobase
+# hyper-content-db
 
-A Kappa-style peer-to-peer database, on top of hyperdrives.
+A [Kappa-style](http://kappa-architecture.com) peer-to-peer content database, on top of hyperdrives.
+
+## Example
 
 ```javascript
-const barcobase = require('barcobase')
-const db = barcobase('./data')
+const hypercontent = require('hyper-content-db')
+const db = hypercontent('./data/db1')
+
+// Let's put a basic schema first.
+db.putSchema('event', {
+  properties: {
+    title: {
+      type: 'string',
+      index: true
+    },
+    date: {
+      type: 'date',
+      index: true
+    }
+  }
+})
+
+// Now add some records.
+db.batch([
+  { schema: 'event', value: { title: 'Workshop', date: new Date(2019, 10, 10) } },
+  { schema: 'event', value: { title: 'Reading', date: new Date(2019, 8, 2) } }
+])
+
+// When all indexing is done, query and log results.
+db.on('indexed-all', query)
+
+db.ready(() => {
+  // Create a second database. Set the first database as primary key.
+  // This will make db2 a "fork" or "extension" of the first.
+  const db2 = hypercontent('./data/db2', db.key)
+  db2.ready(() => {
+    // Add the second database as a source for the first.
+    db.addSource(db2.localKey)
+
+    // Connect the two databases.
+    replicate(db, db2)
+
+    // Add content to the second database.
+    db2.batch([
+      { schema: 'event', value: { title: 'Dinner', date: new Date(2019, 9, 22) } }
+    ])
+  })
+})
+
+function query () {
+  const eventsSortedByDate = db.api.indexes.query({ schema: 'event', prop: 'date' }).pipe(db.createGetStream())
+  eventsSortedByDate.on('data', row => console.log(row.value.date, row.value.title))
+}
+
+function replicate (a, b) {
+  const stream = a.replicate()
+  const stream2 = b.replicate()
+  stream.pipe(stream2).pipe(stream)
+}
+
 ```
 
 ## API
 
-#### `const db = barcobase(storage, key, opts)`
+#### `const db = islands(storage, key, opts)`
 
 `storage` is either a string to a file system path or a [random-access-storage](https://github.com/random-access-storage/) instance.
 
@@ -70,6 +125,8 @@ Get a record from the database. `req` should look like this:
 
 `cb` is a callback and will be called with `(err, record)` if source is set and with `(err, records)` if source is omitted.
 
+If `opts.reduce` is true, conflicting records will be reduced by modification timestamp, and the callback will be called with `(err, record)` even if `source` is not set. Set `opts.reduce` to a reduce function to change the reduce logic. The reduce function will be called with `(recordA, recordB)` and should return the preferred record.
+
 #### `db.putSchema(name, schema, cb)`
 
 Save a schema into the database. The schema declaration follows the [JSON Schema](https://json-schema.org), with some additional properties.
@@ -87,7 +144,7 @@ const schema = {
     }
   }
 }
-db.putSchema('movie', schema, (err) => {
+db.putSchema('event', schema, (err) => {
   if (!err) console.log('schema saved.')
 })
 ```
@@ -118,6 +175,8 @@ const ops = [
 ]
 ```
 
+If `op` is omitted, it is set to `put`.
+
 #### `const batchStream = db.createBatchStream()`
 
 Returns a duplex stream. The writable side expects to be written to with `op` objects as in `db.batch()`. The readable side emits arrays of ids of the putted records and errors in case of errors.
@@ -133,6 +192,12 @@ getStream.on('data', (record) => {
   console.log(record.value)
 })
 ```
+
+#### `db.list(schema, cb)`
+
+Get a list of all IDs for a schema.
+
+> TODO: This should be a stream instead that can be piped into `createGetStream()`.
 
 #### `db.useRecordView(name, makeView, [opts])`
 
