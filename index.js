@@ -77,11 +77,17 @@ class Contentcore extends EventEmitter {
   _ready (cb) {
     this.multidrive.ready(err => {
       if (err) return cb(err)
-      this.key = this.multidrive.key
-      this.discoveryKey = this.multidrive.discoveryKey
       // TODO: Always wait for a writer?
-      this.multidrive.writer(() => cb())
+      this.multidrive.writer((err) => cb(err))
     })
+  }
+
+  get key () {
+    return this.multidrive.key
+  }
+
+  get discoveryKey () {
+    return this.multidrive.discoveryKey
   }
 
   _initWriter (cb) {
@@ -150,7 +156,7 @@ class Contentcore extends EventEmitter {
     for (let msg of msgs) {
       const { op = 'put', schema, id, value } = msg
 
-      if (op === 'put') this.put(schema, id, value, finish)
+      if (op === 'put') this.put({ schema, id, value }, finish)
       else if (op === 'del') this.del(schema, id, finish)
       else if (op === 'source') this.addSource(value)
       else if (op === 'schema') this.putSchema(schema, value, finish)
@@ -188,7 +194,7 @@ class Contentcore extends EventEmitter {
     const batchStream = through.obj(function (msg, encoding, next) {
       msg = Array.isArray(msg) ? msg : [msg]
       self.batch(msg, (err, ids) => {
-        if (err) this.error(err)
+        if (err) this.emit('error', err)
         else this.push(ids)
         next(err)
       })
@@ -232,24 +238,15 @@ class Contentcore extends EventEmitter {
     })
   }
 
-  create (schema, value, cb) {
-    this.put(schema, this.id(), value, cb)
-  }
-
-  put (schema, id, value, cb) {
-    // TODO: Make this the default and only support this form.
-    if (typeof schema === 'object') {
-      return this.put(schema.schema, schema.id, schema.value, id)
-    }
+  put (req, cb) {
+    let { schema, id, value } = req
+    if (!id) id = this.id()
 
     this.expandSchemaName(schema, (err, schema) => {
       if (err) return cb(err)
       this.writer((err, drive) => {
         if (err) return cb(err)
         const dir = p.join(P_DATA, schema)
-
-        if (!id) id = this.id()
-
         drive.mkdir(dir, (err) => {
           if (err && err.code !== 'EEXIST') return cb(err)
           const path = makePath(schema, id)
@@ -294,23 +291,22 @@ class Contentcore extends EventEmitter {
         // Skip not found errors.
         if (err && err.code !== 'ENOENT') return cb(err)
         if (record) records.push(record)
-        if (--pending === 0) {
-          let result
-          if (opts.reduce) {
-            if (records.length === 1) {
-              result = records[0]
-            } else {
-              result = records.reduce((result, record) => {
-                if (!result) return record
-                else return opts.reduce(result, record)
-              }, null)
-              result.alternatives = records.filter(r => r.source !== result.source)
-            }
-          } else {
-            result = records
-          }
-          cb(null, result)
-        }
+        if (--pending === 0) finish()
+      }
+
+      function finish () {
+        // If reduce is false, return all records.
+        if (!opts.reduce) return cb(null, records)
+
+        if (!records.length) return cb(null, null)
+        if (records.length === 1) return cb(null, records[0])
+
+        const result = records.reduce((result, record) => {
+          if (!result) return record
+          else return opts.reduce(result, record)
+        }, null)
+        if (result) result.alternatives = records.filter(r => r.source !== result.source)
+        cb(null, result)
       }
 
       function load (drive, cb) {
@@ -318,9 +314,8 @@ class Contentcore extends EventEmitter {
 
         const path = makePath(schema, id)
         const source = hex(drive.key)
+        const cacheKey = `${source}@${seq || drive.version}/${path}`
 
-        const cacheSeq = seq || drive.version
-        const cacheKey = `${source}@${cacheSeq}/${path}`
         const cachedRecord = self.recordCache.get(cacheKey)
         if (cachedRecord) return cb(null, cachedRecord)
 
@@ -331,7 +326,7 @@ class Contentcore extends EventEmitter {
         if (seq) drive = drive.checkout(Math.min(seq + 1, drive.version))
 
         drive.stat(path, (err, stat, trie) => {
-          if (err) return cb(err)
+          if (err || !stat.isFile()) return cb(err, null)
 
           if (opts.fullStat) record.stat = stat
 
@@ -340,9 +335,7 @@ class Contentcore extends EventEmitter {
           drive.readFile(path, (err, buf) => {
             if (err) return cb(err)
             try {
-              const string = buf.toString()
-              const value = JSON.parse(string)
-              record.value = value
+              record.value = JSON.parse(buf.toString())
               self.recordCache.set(cacheKey, record)
               cb(null, record)
             } catch (err) {
@@ -403,91 +396,51 @@ class Contentcore extends EventEmitter {
     })
   }
 
-  putSchema (name, schema, cb) {
+  putSchema (name, schema, cb = noop) {
     this.expandSchemaName(name, (err, name) => {
-      if (err && cb) return cb(err)
-      const encoded = this._encodeSchema(schema, name)
-      const path = p.join(P_SCHEMA, name + '.json')
-      const buf = Buffer.from(JSON.stringify(encoded))
-      this.writer((err, drive) => {
-        if (err) return cb(err)
-        drive.writeFile(path, buf, cb)
-      })
+      if (err) return cb(err)
+      const id = schemaId(name)
+      const value = this._encodeSchema(schema, name, id)
+      this.put({ schema: 'core/schema', id, value }, cb)
     })
-  }
-
-  _encodeSchema (schema, name) {
-    const defaults = {
-      '$schema': 'http://json-schema.org/draft-07/schema#',
-      '$id': `dat://${name}.json`,
-      type: 'object',
-      title: schema.title || name
-    }
-    return Object.assign({}, defaults, schema)
   }
 
   getSchema (name, opts, cb) {
     if (typeof opts === 'function') return this.getSchema(name, {}, opts)
     opts = opts || {}
-    const self = this
-
-    cb = once(cb)
-
-    let pending = 1
-    let candidates = []
-
     this.expandSchemaName(name, (err, name) => {
       if (err) return cb(err)
-      const ns = name.split('/').shift()
-      const path = p.join(P_SCHEMA, name + '.json')
-
-      if (this.hasSource(ns)) getFrom(ns, path, finish)
-      else getAll(path, finish)
+      const id = schemaId(name)
+      this.get({ schema: 'core/schema', id }, { reduce }, (err, record) => {
+        if (err) return cb(err)
+        if (!record) return cb(null, null)
+        return cb(null, record.value)
+      })
     })
 
-    function get (drive, path, cb) {
-      drive.readFile(path, (err, buf) => {
-        if (err || !buf.length) return cb()
-        try {
-          const schema = JSON.parse(buf.toString())
-          cb(null, schema)
-        } catch (err) { cb(err) }
-      })
-    }
-
-    function getFrom (source, path, cb) {
-      self.source(source, drive => {
-        if (!drive) return cb()
-        get(drive, path, cb)
-      })
-    }
-
-    function getAll (path, cb) {
-      self.sources(drives => {
-        pending = drives.length
-        drives.forEach(drive => get(drive, path, cb))
-      })
-    }
-
-    function finish (err, schema) {
-      if (err) return cb(err)
-      if (schema) candidates.push(schema)
-      if (--pending === 0) {
-        if (!candidates.length) return cb()
-        if (candidates.length === 1) return cb(null, candidates[0])
-        else return cb(null, reduce(candidates))
-      }
-    }
-
-    function reduce (schemas) {
-      if (opts.reduce) return opts.reduce(schemas)
-      return schemas.reduce((winner, schema) => {
-        if (!winner || !winner.version) return schema
-        if (!schema.version) return winner
-        return schema.version > winner.version ? schema : winner
-      }, null)
+    function reduce (a, b) {
+      if (opts.reduce) return opts.reduce(a, b)
+      if (a.version && b.version) return a.version > b.version ? a : b
+      if (a.version) return a
+      if (b.version) return b
+      return a
     }
   }
+
+  _encodeSchema (schema, name, id) {
+    const $id = `dat://${hex(this.key)}/${makePath('core/schema', id)}`
+    const defaults = {
+      '$schema': 'http://json-schema.org/draft-07/schema#',
+      '$id': $id,
+      type: 'object',
+      title: name
+    }
+    return Object.assign({}, defaults, schema)
+  }
+}
+
+function schemaId (name) {
+  return name.replace('/', '__')
 }
 
 class InvalidSchemaName extends Error {
@@ -512,25 +465,6 @@ function validSchemaName (schema) {
 
 function hex (key) {
   return Buffer.isBuffer(key) ? key.toString('hex') : key
-}
-
-function mkdirp (fs, path, cb) {
-  const parts = path.split('/')
-  let pending = parts.length
-
-  // simple once fn
-  let error = err => {
-    cb(err)
-    error = () => {}
-  }
-
-  for (let i = 0; i < parts.length; i++) {
-    let path = p.join(parts.slice(0, i))
-    fs.mkdir(path, (err) => {
-      if (err && err !== 'EEXIST') error(err)
-      if (--pending === 0) cb()
-    })
-  }
 }
 
 function cleanStat (stat) {
