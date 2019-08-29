@@ -86,7 +86,7 @@ Create a hypercore-protocol replication stream. See [hyperdrive](https://github.
 
 #### `db.addSource(key, cb)`
 
-Add an additional source hyperdrive. `key` is the key of a barcobase hyperdrive. Barcobase treats all sources equally. 
+Add an additional source hyperdrive. `key` is the key of a hypercontent hyperdrive. Barcobase treats all sources equally. 
 
 > TODO: Document how records from different sources relate to each other.
 
@@ -214,7 +214,7 @@ Register a new database view. Views are functions that will be called whenever r
 `makeView` is a constructor function. It will be called with `(level, db, opts)`:
 
 * `level`: an [LevelUp](https://github.com/Level/levelup)-compatible LevelDB instance for this view
-* `db`: the barcobase db
+* `db`: the hypercontent db
 * `opts`: optional opts passed into `useRecordView`
 
 The constructor function should return a view object with the following keys:
@@ -229,8 +229,8 @@ The constructor function should return a view object with the following keys:
 
 ```javascript
 const through = require('through2')
-const barco = require('barcobase')
-const db = barco('/tmp/testdb')
+const hypercontent = require('hyper-content-db')
+const db = hypercontent('/tmp/testdb')
 
 function dateView (lvl, db) {
   return {
