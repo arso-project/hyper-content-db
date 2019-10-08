@@ -92,18 +92,18 @@ class Contentcore extends EventEmitter {
 
   _initWriter (cb) {
     this._writerReady = true
-    this.multidrive.writer((err, writer) => {
+    this.multidrive.writer((err, drive) => {
       if (err) return cb(err)
       // TODO: Don't do this on every start?
       let dirs = [P_DATA, P_SCHEMA, P_SOURCES]
       let pending = dirs.length
       for (let dir of dirs) {
-        writer.mkdir(dir, done)
+        drive.mkdir(dir, done)
       }
       function done (err) {
         if (err && err.code !== 'EEXIST') return cb(err)
         if (--pending === 0) {
-          cb(null, writer)
+          cb(null, drive)
         }
       }
     })
