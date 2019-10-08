@@ -30,10 +30,10 @@ function serve (cstore) {
   app.get('/', onPath)
 
   app.listen(port, host, () => console.log(`Server listening on http://${host}:${port}`))
-  
+
   function onPath (req, res, next) {
     let path = req.params['0'] || ''
-    path = p.join('/', path) 
+    path = p.join('/', path)
     console.log('GET', path)
     cstore.writer((err, drive) => {
       if (err) return next(err)
@@ -43,7 +43,6 @@ function serve (cstore) {
         if (err && err.code === 'ENOENT') return res.status(404).send('File not found.')
         if (err) return next(err)
         console.log('got stat', stat)
-
 
         if (stat.isDirectory()) {
           console.log('DIR!')

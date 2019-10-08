@@ -79,17 +79,17 @@ function insert (batches, cb) {
   workBench()
   function workBench () {
     // bench('batch insert no.' + i, b => {
-      // b.start()
-      let batch = batches.shift()
-      store.batch(batch, (err, newIds) => {
-        // b.end()
-        i++
-        if (err) return cb(err)
-        ids = [...ids, ...newIds]
-        ids = ids.concat(newIds)
-        if (batches.length) process.nextTick(workBench)
-        else cb(null, ids)
-      })
+    // b.start()
+    let batch = batches.shift()
+    store.batch(batch, (err, newIds) => {
+      // b.end()
+      i++
+      if (err) return cb(err)
+      ids = [...ids, ...newIds]
+      ids = ids.concat(newIds)
+      if (batches.length) process.nextTick(workBench)
+      else cb(null, ids)
+    })
     // })
   }
 }
@@ -133,4 +133,3 @@ function stepper () {
     }
   }
 }
-

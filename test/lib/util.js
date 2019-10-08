@@ -1,7 +1,7 @@
 module.exports = { stepper, once }
 
 function stepper (cb) {
-  let steps = []
+  const steps = []
   return function step (name, fn) {
     if (!fn) return step(null, name)
     if (!name) name = steps.length

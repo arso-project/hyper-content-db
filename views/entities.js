@@ -1,7 +1,5 @@
 const { CHAR_END } = require('../lib/constants')
 const through = require('through2')
-const pump = require('pump')
-const sub = require('subleveldown')
 
 module.exports = entityView
 
@@ -14,8 +12,8 @@ function entityView (db) {
       const ops = []
       msgs.forEach(msg => {
         const { id, schema, seq, source } = msg
-        let value = `${source}@${seq}`
-        let type = 'put'
+        const value = `${source}@${seq}`
+        const type = 'put'
         ops.push({
           type,
           key: `is|${id}|${schema}`,
@@ -32,7 +30,7 @@ function entityView (db) {
     },
     api: {
       all (kcore) {
-        let rs = db.createReadStream({
+        const rs = db.createReadStream({
           gt: 'is|',
           lt: 'is|' + CHAR_END
         })

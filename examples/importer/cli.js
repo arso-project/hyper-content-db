@@ -148,7 +148,6 @@ function show (args, opts, cb) {
   }
 }
 
-
 // function show (args, opts, cb) {
 //   const importer = open(opts)
 //   const store = importer.cstore

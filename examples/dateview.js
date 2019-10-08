@@ -6,7 +6,7 @@ function dateView (lvl, db) {
   return {
     map (records, next) {
       let ops = []
-      console.log('MAP', records.map(r => ({ id: r.id, title: r.value.title})))
+      console.log('MAP', records.map(r => ({ id: r.id, title: r.value.title })))
       for (let record of records) {
         if (!record.value.date) return
         ops.push({

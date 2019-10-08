@@ -6,16 +6,17 @@ module.exports = schemaView
 
 function schemaView (db, cstore) {
   async function map (msgs, next) {
-    let bins = {}
+    const bins = {}
     const ops = []
     const proms = []
 
-    for (let msg of msgs) {
+    for (const msg of msgs) {
       const { schema: name } = msg
       if (!bins[name]) {
         bins[name] = { msgs: [] }
-        proms.push(new Promise(resolve => {
+        proms.push(new Promise((resolve, reject) => {
           cstore.getSchema(name, (err, schema) => {
+            if (err) reject(err)
             bins[name].schema = schema
             resolve()
           })

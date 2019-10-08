@@ -35,7 +35,7 @@ tape('conflict', t => {
   step(cb => {
     store1.batch([
       { schema, id: ids[0], value: { title: 'first!', slug: 'first' } },
-      { schema, id: ids[1], value: { title: 'second!', slug: 'second' } },
+      { schema, id: ids[1], value: { title: 'second!', slug: 'second' } }
     ], cb)
   })
   step((cb, ids1) => {
