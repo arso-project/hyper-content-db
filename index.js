@@ -24,7 +24,7 @@ module.exports = (...args) => new Contentcore(...args)
 module.exports.id = () => Contentcore.id()
 // module.exports.JSON_STRING = JSON_STRING
 
-class Contentcore extends EventEmitter {
+class HyperContentDB extends EventEmitter {
   constructor (storage, key, opts) {
     super()
     opts = opts || {}
@@ -88,6 +88,10 @@ class Contentcore extends EventEmitter {
 
   get discoveryKey () {
     return this.multidrive.discoveryKey
+  }
+
+  close () {
+    this.emit('close')
   }
 
   _initWriter (cb) {
