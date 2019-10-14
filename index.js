@@ -20,8 +20,8 @@ const { P_DATA, P_SCHEMA, P_SOURCES } = require('./lib/constants')
 
 // const JSON_STRING = Symbol('json-buffer')
 
-module.exports = (...args) => new Contentcore(...args)
-module.exports.id = () => Contentcore.id()
+module.exports = (...args) => new HyperContentDB(...args)
+module.exports.id = () => HyperContentDB.id()
 // module.exports.JSON_STRING = JSON_STRING
 
 class HyperContentDB extends EventEmitter {
@@ -48,7 +48,7 @@ class HyperContentDB extends EventEmitter {
     this.kcore.on('indexed', (...args) => this.emit('indexed', ...args))
     this.kcore.on('indexed-all', (...args) => this.emit('indexed-all', ...args))
 
-    this.id = Contentcore.id
+    this.id = HyperContentDB.id
 
     if (opts.defaultViews !== false) {
       this.useRecordView('entities', entitiesView)
@@ -454,8 +454,8 @@ class InvalidSchemaName extends Error {
   }
 }
 
-// Contentcore.id = hyperid({ fixedLength: true, urlSafe: true })
-Contentcore.id = () => shortid.generate()
+// HyperContentDB.id = hyperid({ fixedLength: true, urlSafe: true })
+HyperContentDB.id = () => shortid.generate()
 
 function makePath (schema, id) {
   return p.join(P_DATA, schema, id + '.json')
