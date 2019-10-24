@@ -19,6 +19,7 @@
     "hyperdrive-schemas": "^0.12",
     "hypertrie-index": "^1.0.5",
     "inspect-custom-symbol": "^1.1.0",
+    "kappa-core": "github:Frando/kappa-core#kappa5",
     "kappa-view": "^3.0.0",
     "lodash": "^4.17.15",
     "lru-cache": "^5.1.1",

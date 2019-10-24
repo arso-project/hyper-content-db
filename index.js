@@ -67,7 +67,7 @@ class HyperContentDB extends EventEmitter {
       // contentView wraps the inner view, taking care of
       // adding a .data prefix and optionally loading
       // record contents.
-      return contentView(makeView(db, this, opts))
+      return contentView(makeView(db, this, opts), this)
     })
 
     this.kcore.use(name, view)

@@ -3,7 +3,7 @@ const cstore = require('..')
 const ram = require('random-access-memory')
 const view = require('../views/schema-aware.js')
 
-tape('schema-aware view', t => {
+tape.only('schema-aware view', t => {
   const store1 = cstore(ram)
 
   const schema = 'post'
@@ -40,9 +40,10 @@ tape('schema-aware view', t => {
 
   store1.batch(batch, (err, ids) => {
     t.error(err, 'batch')
-    store1.on('indexed', (name) => {
-      if (name === 'idx') query()
-    })
+  })
+
+  store1.on('indexed', (name) => {
+    if (name === 'idx') query()
   })
 
   function query () {
