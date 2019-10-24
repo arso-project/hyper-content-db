@@ -35,6 +35,7 @@ class HyperContentDB extends EventEmitter {
       multidrive: this.multidrive,
       viewContext: this
     })
+    this.kappa = this.kcore
 
     this.recordCache = new LRU({
       max: opts.cacheSize || 16777216, // 16M
