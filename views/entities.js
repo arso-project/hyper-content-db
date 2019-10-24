@@ -16,12 +16,12 @@ function entityView (db) {
         const type = 'put'
         ops.push({
           type,
-          key: `is|${id}|${schema}`,
+          key: `is|${id}|${schema}|${source}`,
           value
         })
         ops.push({
           type,
-          key: `si|${schema}|${id}`,
+          key: `si|${schema}|${id}|${source}`,
           value
         })
       })
@@ -42,6 +42,9 @@ function entityView (db) {
           this.push({ id, schema, source, seq })
           next()
         }))
+      },
+      get (kcore, opts) {
+        const { schema, id } = opts
       },
       allWithSchema (kcore, opts) {
         const schema = opts.schema

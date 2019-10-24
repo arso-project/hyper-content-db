@@ -58,7 +58,7 @@ class HyperContentDB extends EventEmitter {
     this.ready = thunky(this._ready.bind(this))
   }
 
-  useRecordView (name, makeView, opts) {
+  useRecordView (name, makeView, opts = {}) {
     const db = sub(this.level, 'view.' + name)
     // levelBaseView takes care of the state handling
     // and passes on a subdb, and expects regular
@@ -68,6 +68,26 @@ class HyperContentDB extends EventEmitter {
       // adding a .data prefix and optionally loading
       // record contents.
       return contentView(makeView(db, this, opts))
+    })
+
+    this.kcore.use(name, view)
+    this.api[name] = this.kcore.api[name]
+  }
+
+  useFileView (name, makeView, opts = {}) {
+    const db = sub(this.level, 'view.' + name)
+    // levelBaseView takes care of the state handling
+    // and passes on a subdb, and expects regular
+    // kappa view opts (i.e., map).
+    const view = levelBaseView(db, (db) => {
+      // contentView wraps the inner view, taking care of
+      // adding a .data prefix and optionally loading
+      // record contents.
+      return {
+        transformNodes: true,
+        prefix: opts.prefix || undefined,
+        ...makeView(db, this, opts)
+      }
     })
 
     this.kcore.use(name, view)
