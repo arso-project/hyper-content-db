@@ -4,7 +4,7 @@ const ram = require('random-access-memory')
 const collect = require('collect-stream')
 const L = require('lodash')
 
-tape('prefix', t => {
+tape('entities', t => {
   const store1 = cstore(ram)
   const schema = 'arso.xyz/Entity'
   const record1 = { title: 'world', tags: ['foo', 'bar'] }
@@ -21,12 +21,16 @@ tape('prefix', t => {
     }
   }))
 
+  store1.kappa.pause()
+
   store1.ready(() => {
     store1.writer((err, drive) => {
       t.error(err, 'noerr writer')
       drive.writeFile('foo', 'bar', (err) => {
         t.error(err, 'noerr writeFile')
         store1.put({ schema, value: record1 }, (err, id) => {
+          console.log('put done', id)
+          store1.kappa.resume()
           t.error(err, 'noerr put', id)
         })
       })
@@ -97,11 +101,10 @@ tape('batch and get stream', t => {
     for (let id of ids) {
       t.equal(typeof id, 'string')
     }
+    store.kappa.ready(query)
   })
 
   // stream.on('data', data => console.log('batch result', data))
-
-  store.on('indexed-all', query)
 
   stream.on('error', err => t.error(err))
 

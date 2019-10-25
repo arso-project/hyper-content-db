@@ -1,77 +1,112 @@
-const { CHAR_END } = require('../lib/constants')
 const through = require('through2')
+const charwise = require('charwise')
 
-module.exports = entityView
+module.exports = recordView
 
-function entityView (db) {
-  // const idSchema = sub(db, 'is')
-  // const schemaId = sub(db, 'si')
-  return {
+const keyEncoding = charwise
+
+const indexes = {
+  is: ['id', 'schema', 'source'],
+  si: ['schema', 'id', 'source']
+}
+
+function validate (msg) {
+  return msg.id && msg.schema && msg.source && typeof msg.seq !== 'undefined'
+}
+
+function recordView (db) {
+  const view = {
     map (msgs, next) {
       // console.log('ldb MSGS', msgs)
       const ops = []
       msgs.forEach(msg => {
+        if (!validate(msg)) return
         const { id, schema, seq, source } = msg
-        const value = `${source}@${seq}`
+        const value = seq || 0
         const type = 'put'
+        const _opts = { type, value, keyEncoding }
         ops.push({
-          type,
-          key: `is|${id}|${schema}|${source}`,
-          value
+          key: ['is', id, schema, source],
+          ..._opts
         })
         ops.push({
-          type,
-          key: `si|${schema}|${id}|${source}`,
-          value
+          key: ['si', schema, id, source],
+          ..._opts
         })
       })
       // console.log('ldb BATCH', ops)
       db.batch(ops, next)
     },
+
     api: {
       all (kcore) {
         const rs = db.createReadStream({
-          gt: 'is|',
-          lt: 'is|' + CHAR_END
+          gte: ['is'],
+          lte: ['is', undefined],
+          keyEncoding
         })
+        return rs.pipe(transform(indexes.is))
+      },
 
-        return rs.pipe(through.obj(function (row, enc, next) {
-          // console.log('ldb GET', row)
-          let [id, schema] = row.key.split('|').slice(1)
-          let [source, seq] = row.value.split('@')
-          this.push({ id, schema, source, seq })
-          next()
-        }))
-      },
       get (kcore, opts) {
-        const { schema, id } = opts
+        const { schema, id, source } = opts
+        let rs
+        if (schema && !id) rs = this.bySchema(schema)
+        else if (!schema && id) rs = this.byId(id)
+        else rs = this.byIdAndSchema(id, schema)
+
+        if (source) {
+          return rs.pipe(through.obj(function (row, enc, next) {
+            if (row.source === source) this.push(row)
+            next()
+          }))
+        } else {
+          return rs
+        }
       },
-      allWithSchema (kcore, opts) {
-        const schema = opts.schema
-        let rs = db.createReadStream({
-          gt: `si|${schema}|`,
-          lt: `si|${schema}|` + CHAR_END
+
+      bySchema (kcore, schema) {
+        const rs = db.createReadStream({
+          gte: ['si', schema],
+          lte: ['si', schema, undefined],
+          keyEncoding
         })
-        return rs.pipe(through.obj(function (row, enc, next) {
-          let [schema, id] = row.key.split('|').slice(1)
-          let [source, seq] = row.value.split('@')
-          this.push({ id, schema, source, seq })
-          next()
-        }))
+        return rs.pipe(transform(indexes.si))
       },
-      allWithId (kcore, opts) {
-        const id = opts.id
-        let rs = db.createReadStream({
-          gt: `is|${id}|`,
-          lt: `is|${id}|` + CHAR_END
+
+      byId (kcore, id) {
+        const rs = db.createReadStream({
+          gte: ['is', id],
+          lte: ['is', id, undefined],
+          keyEncoding
         })
-        return rs.pipe(through.obj(function (row, enc, next) {
-          let [id, schema] = row.key.split('|').slice(1)
-          let [source, seq] = row.value.split('@')
-          this.push({ id, schema, source, seq })
-          next()
-        }))
+        return rs.pipe(transform(indexes.is))
+      },
+
+      byIdAndSchema (kcore, id, schema) {
+        const rs = db.createReadStream({
+          gte: ['is', id, schema],
+          lte: ['is', id, schema, undefined],
+          keyEncoding
+        })
+        return rs.pipe(transform(indexes.is))
       }
     }
   }
+
+  return view
+}
+
+function transform (index) {
+  return through.obj(function (row, enc, next) {
+    const { key, value: seq } = row
+    const idx = key.shift()
+    const index = indexes[idx]
+    const record = { seq }
+    for (let i = 0; i < key.length; i++) {
+      record[index[i]] = key[i]
+    }
+    this.push(record)
+    next()
+  })
 }

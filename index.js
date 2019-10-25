@@ -389,7 +389,7 @@ class HyperContentDB extends EventEmitter {
           drive.readdir(path, (err, list) => {
             if (err) return finish(err)
             if (!list.length) return finish()
-            list = list.map(id => id.replace(/\.json$/, ''))
+            list = list.map(parseId)
             finish(null, list)
           })
         })
@@ -424,7 +424,8 @@ class HyperContentDB extends EventEmitter {
   putSchema (name, schema, cb = noop) {
     this.expandSchemaName(name, (err, name) => {
       if (err) return cb(err)
-      const id = schemaId(name)
+      // const id = schemaId(name)
+      const id = name
       const value = this._encodeSchema(schema, name, id)
       this.put({ schema: 'core/schema', id, value }, cb)
     })
@@ -435,7 +436,8 @@ class HyperContentDB extends EventEmitter {
     opts = opts || {}
     this.expandSchemaName(name, (err, name) => {
       if (err) return cb(err)
-      const id = schemaId(name)
+      // const id = schemaId(name)
+      const id = name
       this.get({ schema: 'core/schema', id }, { reduce }, (err, record) => {
         if (err) return cb(err)
         if (!record) return cb(null, null)
@@ -458,15 +460,16 @@ class HyperContentDB extends EventEmitter {
       '$schema': 'http://json-schema.org/draft-07/schema#',
       '$id': $id,
       type: 'object',
+      name,
       title: name
     }
     return Object.assign({}, defaults, schema)
   }
 }
 
-function schemaId (name) {
-  return name.replace('/', '__')
-}
+// function schemaId (name) {
+//   return name.replace('/', '__')
+// }
 
 class InvalidSchemaName extends Error {
   constructor (name) {
@@ -479,7 +482,22 @@ class InvalidSchemaName extends Error {
 HyperContentDB.id = () => shortid.generate()
 
 function makePath (schema, id) {
+  id = id.replace('/', '')
   return p.join(P_DATA, schema, id + '.json')
+}
+
+function parsePath (path) {
+  const parts = path.split('/')
+  parts.shift()
+  let { schemaNS, schemaName, filename } = parts
+  id = parseId(filename)
+  const schema = [schemaNS, schemaName].join('/')
+  return { id, schema }
+}
+
+function parseId (filename) {
+  const id = filename.replace('__', '/').replace('.json', '')
+  return id
 }
 
 function validSchemaName (schema) {

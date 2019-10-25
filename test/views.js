@@ -3,7 +3,7 @@ const cstore = require('..')
 const ram = require('random-access-memory')
 const { runAll } = require('./lib/util')
 
-tape.only('entities', async t => {
+tape('entities', async t => {
   const store1 = cstore(ram)
   const schema = 'arso.xyz/Entity'
   const schema2 = 'arso.xyz/Resource'
@@ -27,9 +27,7 @@ tape.only('entities', async t => {
       })
     },
 
-    cb => {
-      store1.kappa.onViewIndexed('entities', cb)
-    },
+    cb => store1.kcore.ready('entities', cb),
 
     cb => {
       const rs = ev.all()
@@ -47,7 +45,7 @@ tape.only('entities', async t => {
     },
 
     cb => {
-      const rs = ev.allWithSchema({ schema: schema2 })
+      const rs = ev.bySchema(schema2)
       collect(rs, (err, rows) => {
         // console.log(rows)
         t.error(err)
@@ -58,7 +56,7 @@ tape.only('entities', async t => {
     },
 
     cb => {
-      const rs = ev.allWithSchema({ schema })
+      const rs = ev.bySchema(schema)
       collect(rs, (err, rows) => {
         t.error(err)
         t.equal(Object.keys(rows).length, 3, 'count for schema1 matches')
@@ -81,4 +79,3 @@ function collect (stream, cb) {
   stream.on('end', () => cb(null, data))
   stream.on('error', err => cb(err))
 }
-

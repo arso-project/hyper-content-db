@@ -1,52 +1,56 @@
 const { Transform } = require('stream')
+const charwise = require('charwise')
 
 const { CHAR_END, CHAR_SPLIT, CHAR_START } = require('../lib/constants')
 
 module.exports = schemaView
 
 function schemaView (db, cstore) {
-  async function map (msgs, next) {
-    const bins = {}
+  function map (msgs, next) {
+    const buckets = {}
     const ops = []
-    const proms = []
 
+    // Sort into buckets by schema.
     for (const msg of msgs) {
-      const { schema: name } = msg
-      if (!bins[name]) {
-        bins[name] = { msgs: [] }
-        proms.push(new Promise((resolve, reject) => {
-          cstore.getSchema(name, (err, schema) => {
-            if (err) reject(err)
-            bins[name].schema = schema
-            resolve()
-          })
-        }))
-      }
-      bins[name].msgs.push(msg)
+      const { schema } = msg
+      if (!buckets[schema]) buckets[schema] = []
+      buckets[schema].push(msg)
     }
 
-    // Wait until all schemas are loaded.
-    await Promise.all(proms)
+    // Load all schemas.
+    const schemas = {}
+    let pending = Object.keys(buckets).length
+    Object.keys(buckets).forEach(schema => cstore.getSchema(schema, onschema))
 
-    Object.values(bins).forEach(bin => {
-      // Filter out messages without a schema.
-      if (!bin.schema) return
-      bin.msgs.forEach(msg => mapMessage(bin.schema, msg))
-    })
+    function onschema (err, schema) {
+      if (!err && schema) schemas[schema.name] = schema
+      if (--pending === 0) finish()
+    }
 
-    db.batch(ops, () => {
-      next()
-    })
+    function finish () {
+      Object.keys(schemas).forEach(schemaname => {
+        buckets[schemaname].forEach(msg => {
+          mapMessage(schemas[schemaname], msg)
+        })
+      })
+
+      // Now ops is filled.
+      db.batch(ops, () => {
+        next()
+      })
+    }
 
     function mapMessage (schema, msg) {
       const { id, source, seq, schema: schemaName, value } = msg
-      for (let [name, def] of Object.entries(schema.properties)) {
+      // TODO: Recursive?
+      for (const [prop, def] of Object.entries(schema.properties)) {
         if (!def.index) continue
-        if (typeof value[name] === 'undefined') continue
+        if (typeof value[prop] === 'undefined') continue
 
-        const ikey = `${schemaName}|${name}|${value[name]}` +
-          CHAR_SPLIT +
-          `${id}|${source}`
+        const ikey = [schemaName, prop, value[prop], id, source].join(CHAR_SPLIT)
+        // const ikey = `${schemaName}|${prop}|${value[prop]}` +
+        //   CHAR_SPLIT +
+        //   `${id}|${source}`
 
         const ivalue = seq
 
@@ -79,7 +83,7 @@ function schemaView (db, cstore) {
         }
       })
 
-      process.nextTick(init)
+      setImmediate(init)
 
       return proxy
 
@@ -99,7 +103,7 @@ function schemaView (db, cstore) {
           reverse: opts.reverse,
           limit: opts.limit
         }
-        const key = `${opts.schema}|${opts.prop}|`
+        const key = opts.schema + CHAR_SPLIT + opts.prop + CHAR_SPLIT
         lvlopts.gt = key + CHAR_SPLIT
         lvlopts.lt = key + CHAR_END
         if (opts.value) {
@@ -123,8 +127,6 @@ function schemaView (db, cstore) {
 
         rs.pipe(proxy)
       }
-
-      // TODO: continue...
     }
   }
 
@@ -135,9 +137,7 @@ function schemaView (db, cstore) {
 }
 
 function decodeNode (node) {
-  let { key, value: seq } = node
-  let [path, rec] = key.split(CHAR_SPLIT)
-  let [schema, prop, value] = path.split('|')
-  let [id, source] = rec.split('|')
+  const { key, value: seq } = node
+  const [schema, prop, value, id, source] = key.split(CHAR_SPLIT)
   return { schema, prop, value, id, source, seq }
 }

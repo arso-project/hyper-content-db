@@ -1,14 +1,16 @@
 const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
+const collect = require('stream-collector')
+const through = require('through2')
 const view = require('../views/schema-aware.js')
+const { runAll } = require('./lib/util')
 
 tape('schema-aware view', t => {
-  const store1 = cstore(ram)
 
   const schema = 'post'
 
-  store1.putSchema(schema, {
+  const schemadef = {
     properties: {
       title: {
         type: 'string',
@@ -19,79 +21,63 @@ tape('schema-aware view', t => {
         index: true
       }
     }
-  })
+  }
 
-  store1.useRecordView('idx', view)
-
-  let rows = [
+  const rows = [
     { title: 'abcd', date: '2019-11' },
     { title: 'abc', date: '2019-12' },
     { title: 'old', date: '2018-07' },
     { title: 'future', date: '2020-01' }
   ]
-  let batch = rows.map(value => ({
+
+  const batch = rows.map(value => ({
     op: 'put',
-    id: cstore.id(),
     value,
     schema
   }))
 
-  let _run = false
+  const store1 = cstore(ram)
+  store1.useRecordView('idx', view)
 
-  store1.batch(batch, (err, ids) => {
-    t.error(err, 'batch')
-  })
+  runAll([
+    cb => store1.putSchema(schema, schemadef, cb),
+    cb => store1.batch(batch, cb),
+    cb => store1.kappa.ready('idx', cb),
+    cb => {
+      const queries = [
+        {
+          name: 'date all',
+          query: { schema, prop: 'date' },
+          result: ['2018-07', '2019-11', '2019-12', '2020-01']
+        },
+        {
+          name: 'title all',
+          query: { schema, prop: 'title' },
+          result: ['abc', 'abcd', 'future', 'old']
+        },
+        {
+          name: 'title gte lt',
+          query: { schema, prop: 'title', gt: 'abcd', lt: 'h' },
+          result: ['abcd', 'future']
+        }
+      ]
+      runAll(queries.map(info => cb => testQuery(info, cb))).then(cb)
+    },
+    cb => t.end()
+  ])
 
-  store1.on('indexed', (name) => {
-    if (name === 'idx') query()
-  })
-
-  function query () {
-    if (_run) return
-    _run = true
-
-    const queries = [
-      {
-        name: 'date all',
-        q: { schema, prop: 'date' },
-        v: ['2018-07', '2019-11', '2019-12', '2020-01']
-      },
-      {
-        name: 'title all',
-        q: { schema, prop: 'title' },
-        v: ['abc', 'abcd', 'future', 'old']
-      },
-      {
-        name: 'title gte lt',
-        q: { schema, prop: 'title', gt: 'abcd', lt: 'h' },
-        v: ['abcd', 'future']
-      }
-    ]
-    testQueries(queries, (err) => {
+  function testQuery (info, cb) {
+    const { name, query, result } = info
+    const rs = store1.api.idx.query(query)
+      .pipe(store1.createGetStream())
+      .pipe(through.obj(function (record, enc, next) {
+        this.push(record.value[query.prop])
+        next()
+      }))
+    collect(rs, (err, res) => {
       t.error(err)
-      t.end()
+      t.deepEqual(res, result, name + ': results match')
+      cb()
     })
-  }
-
-  function testQueries (queries, cb) {
-    testQuery(queries.shift())
-
-    function testQuery (query) {
-      const { name, q, v } = query
-      let rs = store1.api.idx.query(q)
-      let rows = []
-      rs.on('data', d => rows.push(d))
-      rs.on('err', err => cb(err))
-      rs.on('end', () => {
-        t.deepEqual(
-          rows.map(r => r.value),
-          v,
-          name + ': results match'
-        )
-        if (queries.length) {
-          process.nextTick(testQuery, queries.shift())
-        } else cb()
-      })
-    }
   }
 })
