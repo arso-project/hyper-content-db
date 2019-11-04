@@ -291,8 +291,9 @@ class HyperContentDB extends EventEmitter {
     cb = once(cb)
     opts = opts || {}
 
-    const { id, schema, source, seq } = req
+    let { id, schema, source, seq } = req
 
+    seq = Number(seq)
     if (seq && !source) return cb(new Error('Invalid request: seq without source'))
 
     if (opts.reduce === true) opts.reduce = defaultReduce
