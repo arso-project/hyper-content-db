@@ -461,7 +461,8 @@ class HyperContentDB extends EventEmitter {
       '$id': $id,
       type: 'object',
       name,
-      title: name
+      title: name,
+      properties: schema.properties
     }
     return Object.assign({}, defaults, schema)
   }
