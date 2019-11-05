@@ -39,7 +39,7 @@ function recordView (db) {
     },
 
     api: {
-      all (kcore) {
+      all (kappa) {
         const rs = db.createReadStream({
           gte: ['is'],
           lte: ['is', undefined],
@@ -48,7 +48,7 @@ function recordView (db) {
         return rs.pipe(transform(indexes.is))
       },
 
-      get (kcore, opts) {
+      get (kappa, opts) {
         const { schema, id, source } = opts
         let rs
         if (schema && !id) rs = this.bySchema(schema)
@@ -65,7 +65,7 @@ function recordView (db) {
         }
       },
 
-      bySchema (kcore, schema) {
+      bySchema (kappa, schema) {
         const rs = db.createReadStream({
           gte: ['si', schema],
           lte: ['si', schema, undefined],
@@ -74,7 +74,7 @@ function recordView (db) {
         return rs.pipe(transform(indexes.si))
       },
 
-      byId (kcore, id) {
+      byId (kappa, id) {
         const rs = db.createReadStream({
           gte: ['is', id],
           lte: ['is', id, undefined],
@@ -83,7 +83,7 @@ function recordView (db) {
         return rs.pipe(transform(indexes.is))
       },
 
-      byIdAndSchema (kcore, id, schema) {
+      byIdAndSchema (kappa, id, schema) {
         const rs = db.createReadStream({
           gte: ['is', id, schema],
           lte: ['is', id, schema, undefined],

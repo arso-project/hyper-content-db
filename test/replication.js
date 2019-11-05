@@ -1,10 +1,11 @@
 const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
+const collect = require('collect-stream')
 
 tape('replication and sources', async t => {
   const store1 = cstore(ram)
-  var store2, id, store2localWriterKey
+  var store2, id
 
   const schema = 'arso.xyz/Entity'
   const record1 = { title: 'world', tags: ['foo', 'bar'] }
@@ -22,21 +23,22 @@ tape('replication and sources', async t => {
     }),
     cb => store2.put({ schema, id, value: record2 }, cb),
 
-    cb => store2.writer((err, drive) => {
-      store2localWriterKey = drive.key
-      cb(err)
-    }),
+    // cb => {
+    //   console.log('store1 world: ', store1.key.toString('hex'))
+    //   console.log('store1 local: ', store1.localKey.toString('hex'))
+    //   console.log('store2 world: ', store2.key.toString('hex'))
+    //   console.log('store2 local: ', store2.localKey.toString('hex'))
+    //   cb()
+    // },
 
     // First replication. Note that this will keep running.
     cb => replicate(store1, store2, cb),
+
     cb => {
       store2.get({ schema, id }, (err, records) => {
         t.error(err, 'no err')
         t.equal(records.length, 2)
-        t.equal(records[0].id, id)
-        t.equal(records[1].id, id)
-        t.equal(records[0].value.title, 'world')
-        t.equal(records[1].value.title, 'moon')
+        t.deepEqual(records.map(r => r.value.title).sort(), ['moon', 'world'], 'titles ok')
         cb()
       })
     },
@@ -44,35 +46,41 @@ tape('replication and sources', async t => {
     // the primary source has not added store2's local writer
     cb => store1.get({ schema, id }, (err, records) => {
       t.error(err)
-      t.equal(records.length, 1)
+      t.equal(records.length, 1, '1 record before merge')
       cb()
     }),
 
-    cb => store1.addSource(store2localWriterKey, cb),
-
-    cb => setTimeout(cb, 100),
+    cb => store1.addSource(store2.localKey, cb),
 
     cb => store1.get({ schema, id }, (err, records) => {
+      console.log(store1.multidrive._sources.size)
       t.error(err)
-      t.equal(records.length, 2)
+      t.equal(records.length, 2, 'two records after merge')
       cb()
     }),
 
     cb => {
-      store1.sources(drives => {
-        cb()
+      store1.kappa.ready(() => {
+        const rs = store1.api.entities.all()
+        collect(rs, (err, records) => {
+          t.error(err)
+          t.equal(records.length, 2)
+          cb()
+        })
       })
+    },
+
+    cb => {
+      t.end()
     }
   ])
-
-  t.end()
 })
 
 function replicate (a, b, cb) {
   cb = once(cb)
-  var stream = a.replicate({ live: true })
-  stream.pipe(b.replicate()).pipe(stream).on('end', cb)
-  setTimeout(() => cb(), 100)
+  var stream = a.replicate(true, { live: true })
+  stream.pipe(b.replicate(false, { live: true })).pipe(stream)
+  setImmediate(cb)
 }
 
 function once (fn) {
@@ -98,19 +106,8 @@ function runAll (ops) {
   })
 }
 
-// function validateCore(t, core, values) {
-//   const ops = values.map((v, idx) => cb => {
-//     core.get(idx, (err, value) => {
-//       t.error(err, 'no error')
-//       t.same(value, values[idx])
-//       return cb(null)
-//     })
-//   })
-//   return runAll(ops)
-// }
-
 function key (k) {
-  return k.toString('hex').slice(0, 2)
+  return k.toString('hex').slice(0, 4)
 }
 
 function contentFeed (drive) {
@@ -129,32 +126,3 @@ function logDrive (drive, name) {
     version %s
     contentLength %s`, name, key(drive.key), cf && key(cf.key), drive.writable, drive.version, cf && cf.length)
 }
-
-// function repl (s1, s2, cb) {
-//   // const opts = { live: false }
-//   const opts = {}
-//   // const stream = s1.replicate(opts)
-//   // stream.pipe(s2.replicate(opts)).pipe(stream)
-//   // stream.on('end', cb)
-//   // stream.on('error', err => console.error(err))
-//   const dr1 = s1.multidrive.primaryDrive
-//   const dr2 = s2.multidrive.primaryDrive
-//   logDrive(dr1, 'drive1')
-//   logDrive(dr2, 'drive2')
-//   s2.writer((err, drive) => logDrive(drive, 'drive2.writer'))
-//   const str1 = dr1.replicate()
-//   const str2 = dr2.replicate()
-//   console.log('stream1', key(str1.id))
-//   console.log('stream2', key(str2.id))
-//   pump(str1, str2, str1)
-//   // str1.on('data', d => console.log('d1', d))
-//   // str2.on('data', d => console.log('d2', d))
-//   str1.on('end', cb)
-//   setTimeout(() => {
-//     logDrive(dr1, 'drive1')
-//     logDrive(dr2, 'drive2')
-//     // console.log(str1)
-//     // console.log(str2)
-//     cb()
-//   }, 200)
-// }

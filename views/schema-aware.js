@@ -64,7 +64,7 @@ function schemaView (db, cstore) {
   }
 
   const api = {
-    query (kcore, opts, cb) {
+    query (kappa, opts, cb) {
       // const example = {
       //   schema: 'arso.xyz/Book',
       //   prop: 'publicatenDate',

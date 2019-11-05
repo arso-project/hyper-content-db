@@ -3,14 +3,16 @@ const p = require('path')
 const { EventEmitter } = require('events')
 const through = require('through2')
 const LRU = require('lru-cache')
-// const hyperid = require('hyperid')
+const hyperdriveSource = require('kappa-core/sources/hyperdrive')
+const { Kappa } = require('kappa-core')
+const raf = require('random-access-memory')
 const shortid = require('shortid')
 const memdb = require('memdb')
 const sub = require('subleveldown')
 const levelBaseView = require('kappa-view')
+const Corestore = require('corestore')
 
 const multidrive = require('./lib/multidrive')
-const kappa = require('./lib/kappa')
 
 const entitiesView = require('./views/entities')
 const contentView = require('./views/content')
@@ -29,25 +31,40 @@ class HyperContentDB extends EventEmitter {
     super()
     opts = opts || {}
 
-    this.multidrive = multidrive(storage, key, opts)
+    this.level = opts.level || memdb()
 
-    this.kcore = kappa({
-      multidrive: this.multidrive,
-      viewContext: this
+    if (typeof storage === 'function') {
+      this.storage = path => storage(path)
+    } else if (typeof storage === 'string') {
+      this.storage = path => raf(storage + '/' + path)
+    }
+
+    this.corestore = opts.corestore || new Corestore(path => this.storage('corestore/' + path))
+
+    this.kappa = new Kappa()
+
+    this.multidrive = multidrive({
+      key,
+      corestore: this.corestore,
+      storage: path => this.storage('multidrive/' + path)
     })
-    this.kappa = this.kcore
+
+    this.multidrive.on('source', drive => {
+      this.kappa.source(drive.key.toString('hex'), hyperdriveSource, {
+        drive,
+        mount: false
+      })
+    })
 
     this.recordCache = new LRU({
       max: opts.cacheSize || 16777216, // 16M
       length: record => (record.stat && record.stat.size) || 256
     })
 
-    this.level = opts.level || memdb()
-
     this.api = {}
 
-    this.kcore.on('indexed', (...args) => this.emit('indexed', ...args))
-    this.kcore.on('indexed-all', (...args) => this.emit('indexed-all', ...args))
+    this.kappa.on('indexed', (...args) => this.emit('indexed', ...args))
+    this.kappa.on('indexed-all', (...args) => this.emit('indexed-all', ...args))
 
     this.id = HyperContentDB.id
 
@@ -57,6 +74,7 @@ class HyperContentDB extends EventEmitter {
     }
 
     this.ready = thunky(this._ready.bind(this))
+    this.ready()
   }
 
   useRecordView (name, makeView, opts = {}) {
@@ -71,8 +89,8 @@ class HyperContentDB extends EventEmitter {
       return contentView(makeView(db, this, opts), this)
     })
 
-    this.kcore.use(name, view)
-    this.api[name] = this.kcore.api[name]
+    this.kappa.use(name, view)
+    this.api[name] = this.kappa.api[name]
   }
 
   useFileView (name, makeView, opts = {}) {
@@ -91,8 +109,8 @@ class HyperContentDB extends EventEmitter {
       }
     })
 
-    this.kcore.use(name, view)
-    this.api[name] = this.kcore.api[name]
+    this.kappa.use(name, view)
+    this.api[name] = this.kappa.api[name]
   }
 
   _ready (cb) {
@@ -120,22 +138,20 @@ class HyperContentDB extends EventEmitter {
     this.multidrive.writer((err, drive) => {
       if (err) return cb(err)
       // TODO: Don't do this on every start?
-      let dirs = [P_DATA, P_SCHEMA, P_SOURCES]
+      const dirs = [P_DATA, P_SCHEMA, P_SOURCES]
       let pending = dirs.length
-      for (let dir of dirs) {
+      for (const dir of dirs) {
         drive.mkdir(dir, done)
       }
       function done (err) {
         if (err && err.code !== 'EEXIST') return cb(err)
-        if (--pending === 0) {
-          cb(null, drive)
-        }
+        if (--pending === 0) cb(null, drive)
       }
     })
   }
 
   use (view, opts) {
-    this.kcore.use(view, opts)
+    this.kappa.use(view, opts)
   }
 
   writer (cb) {
@@ -156,7 +172,7 @@ class HyperContentDB extends EventEmitter {
 
   addSource (key, cb) {
     cb = cb || noop
-    this.multidrive.saveSource(key, cb)
+    this.multidrive.addSource(key, cb)
   }
 
   hasSource (key) {

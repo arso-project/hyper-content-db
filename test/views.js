@@ -27,7 +27,7 @@ tape('entities', async t => {
       })
     },
 
-    cb => store1.kcore.ready('entities', cb),
+    cb => store1.kappa.ready('entities', cb),
 
     cb => {
       const rs = ev.all()

@@ -4,7 +4,7 @@ const ram = require('random-access-memory')
 const collect = require('collect-stream')
 const L = require('lodash')
 
-tape('entities', t => {
+tape('records', t => {
   const store1 = cstore(ram)
   const schema = 'arso.xyz/Entity'
   const record1 = { title: 'world', tags: ['foo', 'bar'] }
