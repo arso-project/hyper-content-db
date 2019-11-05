@@ -48,10 +48,10 @@ tape('batch', t => {
   ]
   store1.batch(records, (err, ids) => {
     t.error(err)
-    t.equal(ids.length, 3)
+    t.equal(ids.length, 3, 'put ok')
     store1.list(schema, (err, ids) => {
       t.error(err)
-      t.equal(ids.length, 3)
+      t.equal(ids.length, 3, 'list ok')
       let data = []
       ids.forEach(id => store1.get({ schema, id }, collect))
       function collect (err, records) {
