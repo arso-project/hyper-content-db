@@ -166,8 +166,8 @@ class HyperContentDB extends EventEmitter {
     return this.multidrive.localKey
   }
 
-  replicate (opts) {
-    return this.multidrive.replicate(opts)
+  replicate (isInitiator, opts) {
+    return this.corestore.replicate(isInitiator, opts)
   }
 
   addSource (key, cb) {
