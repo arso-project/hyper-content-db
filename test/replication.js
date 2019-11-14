@@ -1,7 +1,7 @@
 const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
-const collect = require('collect-stream')
+const collect = require('stream-collector')
 
 tape('replication and sources', async t => {
   const store1 = cstore(ram)

@@ -1,112 +1,109 @@
 const through = require('through2')
-const charwise = require('charwise')
+const keyEncoding = require('charwise')
 
-module.exports = recordView
-
-const keyEncoding = charwise
-
-const indexes = {
+const INDEXES = {
   is: ['id', 'schema', 'source'],
   si: ['schema', 'id', 'source']
 }
 
-function validate (msg) {
-  return msg.id && msg.schema && msg.source && typeof msg.seq !== 'undefined'
-}
-
-function recordView (db) {
-  const view = {
+module.exports = function recordView (lvl) {
+  return {
     map (msgs, next) {
-      // console.log('ldb MSGS', msgs)
       const ops = []
       msgs.forEach(msg => {
         if (!validate(msg)) return
-        const { id, schema, seq, source } = msg
-        const value = seq || 0
-        const type = 'put'
-        const _opts = { type, value, keyEncoding }
-        ops.push({
-          key: ['is', id, schema, source],
-          ..._opts
-        })
-        ops.push({
-          key: ['si', schema, id, source],
-          ..._opts
-        })
+        ops.push(...msgToOps(msg))
       })
-      // console.log('ldb BATCH', ops)
-      db.batch(ops, next)
+      lvl.batch(ops, next)
     },
 
     api: {
       all (kappa) {
-        const rs = db.createReadStream({
+        const rs = lvl.createReadStream({
           gte: ['is'],
           lte: ['is', undefined],
           keyEncoding
         })
-        return rs.pipe(transform(indexes.is))
+        return rs.pipe(transform(INDEXES.is))
       },
 
       get (kappa, opts) {
+        if (!opts) return this.all()
         const { schema, id, source } = opts
         let rs
         if (schema && !id) rs = this.bySchema(schema)
         else if (!schema && id) rs = this.byId(id)
         else rs = this.byIdAndSchema(id, schema)
 
-        if (source) {
-          return rs.pipe(through.obj(function (row, enc, next) {
-            if (row.source === source) this.push(row)
-            next()
-          }))
-        } else {
-          return rs
-        }
+        if (source) return rs.pipe(filterSource(source))
+        else return rs
       },
 
       bySchema (kappa, schema) {
-        const rs = db.createReadStream({
+        const rs = lvl.createReadStream({
           gte: ['si', schema],
           lte: ['si', schema, undefined],
           keyEncoding
         })
-        return rs.pipe(transform(indexes.si))
+        return rs.pipe(transform())
       },
 
       byId (kappa, id) {
-        const rs = db.createReadStream({
+        const rs = lvl.createReadStream({
           gte: ['is', id],
           lte: ['is', id, undefined],
           keyEncoding
         })
-        return rs.pipe(transform(indexes.is))
+        return rs.pipe(transform())
       },
 
       byIdAndSchema (kappa, id, schema) {
-        const rs = db.createReadStream({
+        const rs = lvl.createReadStream({
           gte: ['is', id, schema],
           lte: ['is', id, schema, undefined],
           keyEncoding
         })
-        return rs.pipe(transform(indexes.is))
+        return rs.pipe(transform())
       }
     }
   }
-
-  return view
 }
 
-function transform (index) {
+function validate (msg) {
+  return msg.id && msg.schema && msg.source && typeof msg.seq !== 'undefined'
+}
+
+function msgToOps (msg) {
+  const ops = []
+  const value = msg.seq || 0
+  const shared = { type: 'put', value, keyEncoding }
+  Object.entries(INDEXES).forEach(([key, fields]) => {
+    fields = fields.map(field => msg[field])
+    ops.push({
+      key: [key, ...fields],
+      ...shared
+    })
+  })
+  return ops
+}
+
+function transform () {
   return through.obj(function (row, enc, next) {
     const { key, value: seq } = row
     const idx = key.shift()
-    const index = indexes[idx]
+    const index = INDEXES[idx]
     const record = { seq }
     for (let i = 0; i < key.length; i++) {
       record[index[i]] = key[i]
     }
     this.push(record)
+    next()
+  })
+}
+
+function filterSource (source) {
+  return through.obj(function (row, enc, next) {
+    if (row.source === source) this.push(row)
     next()
   })
 }

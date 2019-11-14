@@ -1,7 +1,7 @@
 const tape = require('tape')
 const cstore = require('..')
 const ram = require('random-access-memory')
-const collect = require('collect-stream')
+const collect = require('stream-collector')
 const L = require('lodash')
 
 tape('records', t => {
@@ -29,7 +29,6 @@ tape('records', t => {
       drive.writeFile('foo', 'bar', (err) => {
         t.error(err, 'noerr writeFile')
         store1.put({ schema, value: record1 }, (err, id) => {
-          console.log('put done', id)
           store1.kappa.resume()
           t.error(err, 'noerr put', id)
         })
@@ -96,9 +95,10 @@ tape('batch and get stream', t => {
   stream.write(records)
   stream.end()
   collect(stream, (err, ids) => {
+    console.log('ids', ids)
     t.error(err)
     t.equal(ids.length, 2, 'got two ids back')
-    for (let id of ids) {
+    for (const id of ids) {
       t.equal(typeof id, 'string')
     }
     store.kappa.ready(query)

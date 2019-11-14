@@ -13,18 +13,13 @@ const levelBaseView = require('kappa-view')
 const Corestore = require('corestore')
 
 const multidrive = require('./lib/multidrive')
-
+const transformHyperdrive = require('./views/transform-hyperdrive')
 const entitiesView = require('./views/entities')
-const contentView = require('./views/content')
-const schemaAwareView = require('./views/schema-aware')
-
+const indexesView = require('./views/indexes')
 const { P_DATA, P_SCHEMA, P_SOURCES } = require('./lib/constants')
-
-// const JSON_STRING = Symbol('json-buffer')
 
 module.exports = (...args) => new HyperContentDB(...args)
 module.exports.id = () => HyperContentDB.id()
-// module.exports.JSON_STRING = JSON_STRING
 
 class HyperContentDB extends EventEmitter {
   constructor (storage, key, opts) {
@@ -52,7 +47,8 @@ class HyperContentDB extends EventEmitter {
     this.multidrive.on('source', drive => {
       this.kappa.source(drive.key.toString('hex'), hyperdriveSource, {
         drive,
-        mount: false
+        mount: false,
+        transform: transformHyperdrive(this)
       })
     })
 
@@ -61,64 +57,15 @@ class HyperContentDB extends EventEmitter {
       length: record => (record.stat && record.stat.size) || 256
     })
 
-    this.api = {}
-
-    this.kappa.on('indexed', (...args) => this.emit('indexed', ...args))
-    this.kappa.on('indexed-all', (...args) => this.emit('indexed-all', ...args))
-
     this.id = HyperContentDB.id
 
     if (opts.defaultViews !== false) {
       this.useRecordView('entities', entitiesView)
-      this.useRecordView('indexes', schemaAwareView)
+      this.useRecordView('indexes', indexesView)
     }
 
     this.ready = thunky(this._ready.bind(this))
     this.ready()
-  }
-
-  useRecordView (name, makeView, opts = {}) {
-    const db = sub(this.level, 'view.' + name)
-    // levelBaseView takes care of the state handling
-    // and passes on a subdb, and expects regular
-    // kappa view opts (i.e., map).
-    const view = levelBaseView(db, (db) => {
-      // contentView wraps the inner view, taking care of
-      // adding a .data prefix and optionally loading
-      // record contents.
-      return contentView(makeView(db, this, opts), this)
-    })
-
-    this.kappa.use(name, view)
-    this.api[name] = this.kappa.api[name]
-  }
-
-  useFileView (name, makeView, opts = {}) {
-    const db = sub(this.level, 'view.' + name)
-    // levelBaseView takes care of the state handling
-    // and passes on a subdb, and expects regular
-    // kappa view opts (i.e., map).
-    const view = levelBaseView(db, (db) => {
-      // contentView wraps the inner view, taking care of
-      // adding a .data prefix and optionally loading
-      // record contents.
-      return {
-        transformNodes: true,
-        prefix: opts.prefix || undefined,
-        ...makeView(db, this, opts)
-      }
-    })
-
-    this.kappa.use(name, view)
-    this.api[name] = this.kappa.api[name]
-  }
-
-  _ready (cb) {
-    this.multidrive.ready(err => {
-      if (err) return cb(err)
-      // TODO: Always wait for a writer?
-      this.multidrive.writer((err) => cb(err))
-    })
   }
 
   get key () {
@@ -127,6 +74,55 @@ class HyperContentDB extends EventEmitter {
 
   get discoveryKey () {
     return this.multidrive.discoveryKey
+  }
+
+  get api () {
+    return this.kappa.api
+  }
+
+  get localKey () {
+    return this.multidrive.localKey
+  }
+
+  replicate (isInitiator, opts) {
+    return this.corestore.replicate(isInitiator, opts)
+  }
+
+  useRecordView (name, makeView, opts = {}) {
+    const db = sub(this.level, 'view.' + name)
+    // levelBaseView takes care of the state handling
+    // and passes on a subdb, and expects regular
+    // kappa view opts (i.e., map).
+    const view = levelBaseView(db, (db) => {
+      // recordBaseView wraps the inner view, taking care of
+      // adding a .data prefix and optionally loading
+      // record contents.
+      // return recordBaseView(makeView(db, this, opts), this)
+      return makeView(db, this, opts)
+    })
+
+    this.kappa.use(name, view)
+  }
+
+  useFileView (name, makeView, opts = {}) {
+    const db = sub(this.level, 'view.' + name)
+    const view = levelBaseView(db, (db) => {
+      return {
+        transformNodes: true,
+        prefix: opts.prefix || undefined,
+        ...makeView(db, this, opts)
+      }
+    })
+
+    this.kappa.use(name, view)
+  }
+
+  _ready (cb) {
+    this.multidrive.ready(err => {
+      if (err) return cb(err)
+      // TODO: Always wait for a writer?
+      this.multidrive.writer((err) => cb(err))
+    })
   }
 
   close () {
@@ -160,14 +156,6 @@ class HyperContentDB extends EventEmitter {
       if (!this._writerReady) this._initWriter(cb)
       else this.multidrive.writer(cb)
     })
-  }
-
-  get localKey () {
-    return this.multidrive.localKey
-  }
-
-  replicate (isInitiator, opts) {
-    return this.corestore.replicate(isInitiator, opts)
   }
 
   addSource (key, cb) {
@@ -236,7 +224,7 @@ class HyperContentDB extends EventEmitter {
       msg = Array.isArray(msg) ? msg : [msg]
       self.batch(msg, (err, ids) => {
         if (err) this.emit('error', err)
-        else this.push(ids)
+        else ids.forEach(id => this.push(id))
         next(err)
       })
     })
@@ -502,15 +490,6 @@ HyperContentDB.id = () => shortid.generate()
 function makePath (schema, id) {
   id = id.replace('/', '')
   return p.join(P_DATA, schema, id + '.json')
-}
-
-function parsePath (path) {
-  const parts = path.split('/')
-  parts.shift()
-  let { schemaNS, schemaName, filename } = parts
-  id = parseId(filename)
-  const schema = [schemaNS, schemaName].join('/')
-  return { id, schema }
 }
 
 function parseId (filename) {
