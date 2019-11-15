@@ -1,0 +1,25 @@
+const umkv = require('unordered-materialized-kv')
+const { keyseq } = require('../util')
+
+module.exports = function kvView (lvl, db) {
+  const kv = umkv(lvl)
+  return {
+    name: 'kv',
+    map (msgs, next) {
+      const ops = msgs.map(record => ({
+        key: record.id,
+        id: keyseq(record),
+        links: record.links
+      }))
+      kv.batch(ops, next)
+    },
+    api: {
+      getLinks (kappa, record, cb) {
+        kv.get(record.id, cb)
+      },
+      isLinked (kappa, record, cb) {
+        kv.isLinked(keyseq(record), cb)
+      }
+    }
+  }
+}
