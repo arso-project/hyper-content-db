@@ -1,43 +1,106 @@
 const Corestore = require('corestore')
 const ram = require('random-access-memory')
-const Ajv = require('ajv')
 const sub = require('subleveldown')
 const memdb = require('memdb')
-const { uuid } = require('./util')
-const { Transform } = require('stream')
 const corestoreSource = require('kappa-core/sources/corestore')
 const { Kappa } = require('kappa-core')
 const collect = require('stream-collector')
 const crypto = require('crypto')
 
-const { Record } = require('./lib/messages')
-
+const { Record: RecordEncoding } = require('./lib/messages')
+const SchemaStore = require('./schema')
+const { uuid, through } = require('./util')
 const kvView = require('./views/kv')
 const recordsView = require('./views/records')
 const indexView = require('./views/indexes')
 
-module.exports = class Database {
-  constructor (opts = {}) {
-    const self = this
+module.exports = function CorestoreDatabase (opts = {}) {
+  const backend = new CorestoreBackend(opts)
+  return new Database({ ...opts, backend })
+}
 
+class Record {
+  static decode (buf, props = {}) {
+    let record = RecordEncoding.decode(buf)
+    record = { ...record, ...props }
+    if (Buffer.isBuffer(record.key)) record.key = record.key.toString('hex')
+    if (record.seq) record.seq = Number(record.seq)
+    if (record.value) record.value = JSON.parse(record.value)
+    return record
+  }
+
+  static encode (record) {
+    if (record.value) record.value = JSON.stringify(record.value)
+    const buf = RecordEncoding.encode(record)
+    return buf
+  }
+}
+
+class CorestoreBackend {
+  constructor (opts) {
+    this.corestore = opts.corestore || defaultCorestore(opts)
+  }
+
+  open (cb) {
+    return this.corestore.ready(cb)
+  }
+
+  append (record, cb) {
+    const feed = this._localWriter()
+    record = Record.encode(record)
+    feed.append(record, cb)
+  }
+
+  get (key, seq, cb) {
+    const feed = this._feed(key)
+    feed.get(seq, (err, buf) => {
+      if (err) return cb(err)
+      const record = Record.decode(buf, { key, seq })
+      cb(null, record)
+    })
+  }
+
+  kappaSource () {
+    return {
+      create: corestoreSource,
+      opts: {
+        store: this.corestore,
+        transform (msgs, next) {
+          next(msgs.map(msg => {
+            const { key, seq, value } = msg
+            return Record.decode(value, { key, seq })
+          }))
+        }
+      }
+    }
+  }
+
+  _localWriter () {
+    return this._feed({ default: true })
+  }
+
+  _feed (opts) {
+    if (Buffer.isBuffer(opts)) opts = { key: opts.toString('hex') }
+    if (typeof opts === 'string') opts = { key: opts }
+    // TODO: Pass a key as parent?
+    const feed = this.corestore.get(opts)
+    return feed
+  }
+}
+
+class Database {
+  constructor (opts = {}) {
+    this.opts = opts
     this.key = opts.key
     if (!this.key) this.key = crypto.randomBytes(32)
 
-    this.corestore = opts.corestore || defaultCorestore(opts)
+    this.backend = opts.backend
+    this.backend.key = this.key
+
+    this.encoding = Record
     this.schemas = opts.schemas || new SchemaStore({ key: this.key })
-
     this.lvl = opts.level || memdb()
-
     this.kappa = new Kappa()
-    this.kappa.source('input', corestoreSource, {
-      store: this.corestore,
-      transform (msgs, next) {
-        next(msgs.map(msg => {
-          const { key, seq, value } = msg
-          return self.schemas.decodeRecord(value, { key, seq })
-        }))
-      }
-    })
 
     this.views = this.kappa.useStack('db', [
       kvView(sub(this.lvl, 'kv'), this),
@@ -45,21 +108,21 @@ module.exports = class Database {
       indexView(sub(this.lvl, 'idx'), this)
     ])
 
-    this.feeds = {}
+    const kappaSource = this.backend.kappaSource()
+    this.kappa.source('input', kappaSource.create, kappaSource.opts)
+
     this._opened = false
   }
 
-  replicate (isInitiator, opts) {
-    return this.corestore.replicate(isInitiator, opts)
-  }
+  // replicate (isInitiator, opts) {
+  //   return this.corestore.replicate(isInitiator, opts)
+  // }
 
   ready (cb) {
-    this.corestore.ready(() => {
-      this.writer.ready(() => {
-        this._initSchemas(() => {
-          this._opened = true
-          cb()
-        })
+    this.backend.open(() => {
+      this._initSchemas(() => {
+        this._opened = true
+        cb()
       })
     })
   }
@@ -77,37 +140,33 @@ module.exports = class Database {
     return this.kappa.api
   }
 
-  get writer () {
-    if (!this._localWriter) {
-      const feed = this.corestore.default({
-        name: 'localwriter',
-        valueEncoding: Record,
-        parents: [this.key]
-      })
-      this._localWriter = this.feed(feed.key)
-    }
-    return this._localWriter
-  }
-
-  feed (key) {
-    if (Buffer.isBuffer(key)) key = key.toString('hex')
-    if (this.feeds[key]) return this.feeds[key]
-    const feed = this.corestore.get({
-      key,
-      valueEncoding: Record,
-      parents: [this.key]
-    })
-    const recordFeed = new RecordFeed(feed, this)
-    this.feeds[key] = recordFeed
-    return this.feeds[key]
-  }
-
-  get sourceId () {
-    return this.writer.key.toString('hex')
-  }
-
   put (record, cb) {
-    this.writer.put(record, cb)
+    record.schema = this.schemas.resolveName(record.schema)
+    if (!this.schemas.validate(record)) return cb(this.schemas.error)
+    if (!record.id) record.id = uuid()
+    this._append(record, err => err ? cb(err) : cb(null, record.id))
+  }
+
+  del (id, cb) {
+    if (typeof id === 'object') id = id.id
+    const record = { id, delete: true }
+    this._append(record, cb)
+  }
+
+  _append (record, cb) {
+    record.timestamp = Date.now()
+    this.getLinks(record, (err, links) => {
+      if (err && err.status !== 404) return cb(err)
+      record.links = links
+      this.backend.append(record, cb)
+    })
+  }
+
+  getKeyseq (key, seq, cb) {
+    this.backend.get(key, seq, (err, record) => {
+      if (err) return cb(err)
+      cb(null, record)
+    })
   }
 
   putSchema (name, schema, cb) {
@@ -181,8 +240,7 @@ module.exports = class Database {
       key = link.key
       seq = link.seq
     }
-    const feed = this.feed(key)
-    feed.get(seq, cb)
+    this.getKeyseq(key, seq, cb)
   }
 
   getSchemas () {
@@ -194,149 +252,6 @@ module.exports = class Database {
   }
 }
 
-class SchemaStore {
-  constructor (opts) {
-    this.key = opts.key
-    this.schemas = {}
-    this.ajv = new Ajv()
-    this.put('core/schema', {
-      type: 'object'
-    })
-  }
-
-  put (name, schema) {
-    name = this.resolveName(name)
-    if (this.schemas[name]) return
-    schema = this.parseSchema(name, schema)
-    this.schemas[name] = schema
-    // TODO: Handle error
-    this.ajv.addSchema(schema, name)
-    return true
-  }
-
-  get (name) {
-    if (typeof name === 'object') {
-      let { schema, source } = name
-      name = this.resolveName(schema)
-    }
-    return this.schemas[name]
-  }
-
-  list () {
-    return Object.value(this.schemas)
-  }
-
-  validate (record) {
-    const name = this.resolveName(record.schema)
-    const result = this.ajv.validate(name, record.value)
-    if (!result) this._lastError = new ValidationError(this.ajv.errorsText(), this.ajv.errors)
-    return result
-  }
-
-  get error () {
-    return this._lastError
-  }
-
-  decodeRecord (record, defaults) {
-    const schema = this.get(record)
-    if (schema.encoding) record.value = schema.encoding.decode(record.value)
-    else record.value = JSON.parse(record.value)
-    record = { ...defaults, ...record }
-    if (Buffer.isBuffer(record.key)) record.key = record.key.toString('hex')
-    if (record.seq) record.seq = Number(record.seq)
-    return record
-  }
-
-  encodeRecord (record, source) {
-    record.schema = this.resolveName(record.schema)
-    if (record.schema && record.value) {
-      const schema = this.get(record.schema)
-      if (schema.encoding) record.value = schema.encoding.encode(record.value)
-      else record.value = JSON.stringify(record.value)
-    }
-    return record
-  }
-
-  resolveName (name, key) {
-    if (!key) key = this.key
-    if (Buffer.isBuffer(key)) key = key.toString('hex')
-    if (name.indexOf('/') === -1) name = key + '/' + name
-    // if (name.indexOf('@') === -1) {
-    // TODO: Support versions
-    // name = name + '@0'
-    // }
-    return name
-  }
-
-  parseSchema (name, schema) {
-    return {
-      $id: name,
-      type: 'object',
-      ...schema
-    }
-  }
-}
-
-class ValidationError extends Error {
-  constructor (message, errors) {
-    super(message)
-    this.errors = errors
-  }
-}
-
-class RecordFeed {
-  constructor (feed, db) {
-    this.db = db
-    this.feed = feed
-    this.ready = this.feed.ready.bind(this.feed)
-  }
-
-  get key () {
-    return this.feed.key
-  }
-
-  put (record, cb) {
-    if (!this.db.schemas.validate(record)) return cb(this.db.schemas.error)
-    if (!record.id) record.id = uuid()
-    this.append(record, err => err ? cb(err) : cb(null, record.id))
-  }
-
-  del (id, cb) {
-    if (typeof id === 'object') id = id.id
-    const record = { id, delete: true }
-    this.append(record, cb)
-  }
-
-  append (record, cb) {
-    if (!this.feed.opened) return this.ready(() => this.append(record, cb))
-    if (!this.feed.writable) return cb(new Error('This feed is not writable'))
-    record.timestamp = Date.now()
-    this.db.getLinks(record, (err, links) => {
-      if (err && err.status !== 404) return cb(err)
-      record.links = links
-      record = this.db.schemas.encodeRecord(record)
-      this.feed.append(record, cb)
-    })
-  }
-
-  get (seq, cb) {
-    if (!this.feed.opened) return this.ready(() => this.get(seq, cb))
-    this.feed.get(seq, (err, buf) => {
-      if (err) return cb(err)
-      const decoded = this.db.schemas.decodeRecord(buf, { key: this.key, seq })
-      cb(null, decoded)
-    })
-  }
-}
-
 function defaultCorestore (opts) {
   return new Corestore(ram, opts)
 }
-
-function through (transform) {
-  return new Transform({
-    objectMode: true,
-    transform
-  })
-}
-
