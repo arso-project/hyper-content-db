@@ -1,8 +1,13 @@
 syntax = "proto2";
 
 message Record {
+  enum Type {
+    PUT = 0;
+    DEL = 1;
+  }
   required string id = 1;
-  optional bool delete = 2;
+  required Type op = 2;
+  // optional bool delete = 2;
   optional string schema = 3;
   optional bytes value = 4;
   optional uint32 timestamp = 5;

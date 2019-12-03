@@ -1,6 +1,7 @@
 const through = require('through2')
 const keyEncoding = require('charwise')
 const { opsForRecords } = require('./helpers')
+const Live = require('level-live')
 
 const INDEXES = {
   is: ['id', 'schema', 'key'],
@@ -13,17 +14,18 @@ module.exports = function recordView (lvl, db) {
     map (msgs, next) {
       opsForRecords(db, msgs, putOps, (err, ops) => {
         if (err) return next(err)
+        console.log('ops', ops)
         lvl.batch(ops, next)
       })
     },
 
     api: {
       all (kappa, cb) {
-        return lvl.createReadStream({
+        return this._query({
           gte: ['is'],
           lte: ['is', undefined],
           keyEncoding
-        }).pipe(transform(INDEXES.is))
+        })
       },
 
       get (kappa, req) {
@@ -32,40 +34,51 @@ module.exports = function recordView (lvl, db) {
         let { schema, id, key, seq } = req
         schema = db.schemas.resolveName(schema)
         let rs
-        if (schema && !id) rs = this.bySchema(schema)
-        else if (!schema && id) rs = this.byId(id)
-        else rs = this.byIdAndSchema(id, schema)
+        if (schema && !id) rs = this.bySchema(schema, req)
+        else if (!schema && id) rs = this.byId(id, req)
+        else rs = this.byIdAndSchema(id, schema, req)
 
         if (key) rs = rs.pipe(filterSource(key, seq))
         return rs
       },
 
-      bySchema (kappa, schema) {
+      bySchema (kappa, schema, opts) {
         schema = db.schemas.resolveName(schema)
-        const rs = lvl.createReadStream({
+        const rs = this._query({
+          ...opts,
           gte: ['si', schema],
-          lte: ['si', schema, undefined],
-          keyEncoding
+          lte: ['si', schema, undefined]
         })
-        return rs.pipe(transform())
+        return rs
       },
 
-      byId (kappa, id) {
-        const rs = lvl.createReadStream({
+      byId (kappa, id, opts) {
+        const rs = this._query(lvl, {
+          ...opts,
           gte: ['is', id],
-          lte: ['is', id, undefined],
-          keyEncoding
+          lte: ['is', id, undefined]
         })
-        return rs.pipe(transform())
+        return rs
       },
 
-      byIdAndSchema (kappa, id, schema) {
+      byIdAndSchema (kappa, id, schema, opts) {
         schema = db.schemas.resolveName(schema)
-        const rs = lvl.createReadStream({
+        return this._query({
+          ...opts,
           gte: ['is', id, schema],
-          lte: ['is', id, schema, undefined],
-          keyEncoding
+          lte: ['is', id, schema, undefined]
         })
+      },
+
+      _query (kappa, opts) {
+        console.log('q', opts)
+        opts.keyEncoding = keyEncoding
+        let rs
+        if (opts.live) {
+          rs = new Live(lvl, opts)
+        } else {
+          rs = lvl.createReadStream(opts)
+        }
         return rs.pipe(transform())
       }
     }
@@ -94,10 +107,10 @@ function putOps (msg, db) {
 
 function transform () {
   return through.obj(function (row, enc, next) {
-    const { key, value: seq } = row
+    const { key, value: seq, type } = row
     const idx = key.shift()
     const index = INDEXES[idx]
-    const record = { seq }
+    const record = { seq, type }
     for (let i = 0; i < key.length; i++) {
       record[index[i]] = key[i]
     }

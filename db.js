@@ -1,7 +1,7 @@
 const Corestore = require('corestore')
 const ram = require('random-access-memory')
 const sub = require('subleveldown')
-const memdb = require('memdb')
+const memdb = require('level-mem')
 const corestoreSource = require('kappa-core/sources/corestore')
 const { Kappa } = require('kappa-core')
 const collect = require('stream-collector')
@@ -46,7 +46,7 @@ class CorestoreBackend {
   }
 
   append (record, cb) {
-    const feed = this._localWriter()
+    const feed = this.localWriter()
     record = Record.encode(record)
     feed.append(record, cb)
   }
@@ -60,22 +60,27 @@ class CorestoreBackend {
     })
   }
 
-  kappaSource () {
-    return {
-      create: corestoreSource,
-      opts: {
-        store: this.corestore,
-        transform (msgs, next) {
-          next(msgs.map(msg => {
-            const { key, seq, value } = msg
-            return Record.decode(value, { key, seq })
-          }))
-        }
-      }
-    }
+  feed (key) {
+    return this.corestore.get({ key })
   }
 
-  _localWriter () {
+  // kappaSource () {
+  //   const opts = {
+  //     store: this.corestore,
+  //     transform (msgs, next) {
+  //       next(msgs.map(msg => {
+  //         const { key, seq, value } = msg
+  //         return Record.decode(value, { key, seq })
+  //       }))
+  //     }
+  //   }
+  //   return {
+  //     create: corestoreSource,
+  //     opts
+  //   }
+  // }
+
+  localWriter () {
     return this._feed({ default: true })
   }
 
@@ -90,6 +95,7 @@ class CorestoreBackend {
 
 class Database {
   constructor (opts = {}) {
+    const self = this
     this.opts = opts
     this.key = opts.key
     if (!this.key) this.key = crypto.randomBytes(32)
@@ -100,16 +106,38 @@ class Database {
     this.encoding = Record
     this.schemas = opts.schemas || new SchemaStore({ key: this.key })
     this.lvl = opts.level || memdb()
+
     this.kappa = new Kappa()
 
-    this.views = this.kappa.useStack('db', [
-      kvView(sub(this.lvl, 'kv'), this),
-      recordsView(sub(this.lvl, 'rc'), this),
-      indexView(sub(this.lvl, 'idx'), this)
-    ])
+    const Indexer = require('./indexer')
+    this.indexer = new Indexer({
+      getFeed (key) {
+        return self.backend.feed(key)
+      },
+      level: sub(this.lvl, 'idx'),
+      encoding: {
+        decode (buf, { key, seq, gseq }) {
+          return Record.decode(buf, { key, seq, gseq })
+        }
+      }
+    })
 
-    const kappaSource = this.backend.kappaSource()
-    this.kappa.source('input', kappaSource.create, kappaSource.opts)
+    this.kappa.use('foo', this.indexer.createSource(), {
+      map (msgs, next) {
+        next()
+      }
+    })
+    this.kappa.use('kv', this.indexer.createSource(), kvView(sub(this.lvl, 'kv'), this))
+    this.kappa.use('records', this.indexer.createSource(), recordsView(sub(this.lvl, 'rc'), this))
+    this.kappa.use('indexes', this.indexer.createSource(), indexView(sub(this.lvl, 'ix'), this))
+
+    // this.views = this.kappa.useStack('db', [
+    //   kvView(sub(this.lvl, 'kv'), this),
+    //   recordsView(sub(this.lvl, 'rc'), this),
+    //   indexView(sub(this.lvl, 'ix'), this)
+    // ])
+    // const kappaSource = this.backend.kappaSource()
+    // this.kappa.source('input', kappaSource.create, kappaSource.opts)
 
     this._opened = false
   }
@@ -121,6 +149,9 @@ class Database {
   ready (cb) {
     this.backend.open(() => {
       this._initSchemas(() => {
+        const localWriter = this.backend.localWriter()
+        this.indexer.add(localWriter.key)
+
         this._opened = true
         cb()
       })
@@ -128,7 +159,11 @@ class Database {
   }
 
   _initSchemas (cb) {
-    const qs = this.api.records.bySchema('core/schema')
+    cb()
+    return
+    const qs = this.api.records.bySchema('core/schema', {
+      live: true
+    })
     this.loadStream(qs, (err, schemas) => {
       if (err) return cb(err)
       schemas.forEach(msg => this.schemas.put(msg.id, msg.value))
@@ -140,25 +175,45 @@ class Database {
     return this.kappa.api
   }
 
+  useRecordView () {
+  }
+
   put (record, cb) {
+    record.op = RecordEncoding.Type.PUT
     record.schema = this.schemas.resolveName(record.schema)
     if (!this.schemas.validate(record)) return cb(this.schemas.error)
     if (!record.id) record.id = uuid()
-    this._append(record, err => err ? cb(err) : cb(null, record.id))
+    this._appendRecord(record, err => err ? cb(err) : cb(null, record.id))
   }
 
   del (id, cb) {
     if (typeof id === 'object') id = id.id
-    const record = { id, delete: true }
-    this._append(record, cb)
+    const record = {
+      id,
+      op: RecordEncoding.Type.DEL
+    }
+    this._appendRecord(record, cb)
   }
 
-  _append (record, cb) {
+  _appendRecord (record, cb) {
     record.timestamp = Date.now()
     this.getLinks(record, (err, links) => {
       if (err && err.status !== 404) return cb(err)
       record.links = links
       this.backend.append(record, cb)
+    })
+  }
+
+  get (id, cb) {
+    this.kappa.api.kv.getLinks(id, (err, links) => {
+      if (err) cb(err)
+      else this.loadAll(links, cb)
+    })
+  }
+
+  getLinks (record, cb) {
+    this.kappa.api.kv.ready(() => {
+      this.kappa.api.kv.getLinks(record, cb)
     })
   }
 
@@ -175,11 +230,19 @@ class Database {
       if (!this.schemas.put(name, schema)) return cb(this.schemas.error)
       const record = {
         schema: 'core/schema',
-        value: this.schemas.get(name),
+        value: schema,
         id: name
       }
       this.put(record, cb)
     })
+  }
+
+  getSchema (name) {
+    return this.schemas.get(name)
+  }
+
+  getSchemas () {
+    return this.schemas.list()
   }
 
   putSource (key, cb) {
@@ -194,23 +257,10 @@ class Database {
     this.put(record, cb)
   }
 
-  get (id, cb) {
-    this.kappa.api.kv.getLinks(id, (err, links) => {
-      if (err) cb(err)
-      else this.loadAll(links, cb)
-    })
-  }
-
-  getLinks (record, cb) {
-    this.kappa.api.kv.ready(() => {
-      this.kappa.api.kv.getLinks(record, cb)
-    })
-  }
-
   loadStream (stream, cb) {
     if (typeof stream === 'function') return this.loadStream(null, stream)
     const self = this
-    const transform = through(function (req, chunk, next) {
+    const transform = through(function (req, enc, next) {
       self.loadLink(req, (err, record) => {
         if (err) this.emit('error', err)
         else this.push(record)
@@ -241,14 +291,6 @@ class Database {
       seq = link.seq
     }
     this.getKeyseq(key, seq, cb)
-  }
-
-  getSchemas () {
-    return this.schemas.list()
-  }
-
-  getSchema (name) {
-    return this.schemas.get(name)
   }
 }
 
