@@ -2,7 +2,10 @@ const umkv = require('unordered-materialized-kv')
 const { keyseq } = require('../util')
 
 module.exports = function kvView (lvl, db) {
-  const kv = umkv(lvl)
+  const kv = umkv(lvl, {
+    onupdate, onremove
+  })
+
   return {
     name: 'kv',
     map (msgs, next) {
@@ -21,5 +24,12 @@ module.exports = function kvView (lvl, db) {
         kv.isLinked(keyseq(record), cb)
       }
     }
+  }
+
+  function onupdate (msg) {
+    // console.log('onupdate', msg)
+  }
+  function onremove (msg) {
+    // console.log('onremove', msg)
   }
 }

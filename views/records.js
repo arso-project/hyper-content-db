@@ -2,6 +2,7 @@ const through = require('through2')
 const keyEncoding = require('charwise')
 const { opsForRecords } = require('./helpers')
 const Live = require('level-live')
+const collect = require('stream-collector')
 
 const INDEXES = {
   is: ['id', 'schema', 'key'],
@@ -14,14 +15,13 @@ module.exports = function recordView (lvl, db) {
     map (msgs, next) {
       opsForRecords(db, msgs, putOps, (err, ops) => {
         if (err) return next(err)
-        console.log('ops', ops)
         lvl.batch(ops, next)
       })
     },
 
     api: {
       all (kappa, cb) {
-        return this._query({
+        return query(lvl, {
           gte: ['is'],
           lte: ['is', undefined],
           keyEncoding
@@ -29,14 +29,15 @@ module.exports = function recordView (lvl, db) {
       },
 
       get (kappa, req) {
-        if (!req) return this.all()
+        const self = kappa.view.records
+        if (!req) return self.all()
         if (typeof req === 'string') req = { id: req }
         let { schema, id, key, seq } = req
-        schema = db.schemas.resolveName(schema)
+        if (schema) schema = db.schemas.resolveName(schema)
         let rs
-        if (schema && !id) rs = this.bySchema(schema, req)
-        else if (!schema && id) rs = this.byId(id, req)
-        else rs = this.byIdAndSchema(id, schema, req)
+        if (schema && !id) rs = self.bySchema(schema, req)
+        else if (!schema && id) rs = self.byId(id, req)
+        else rs = self.byIdAndSchema(id, schema, req)
 
         if (key) rs = rs.pipe(filterSource(key, seq))
         return rs
@@ -44,7 +45,7 @@ module.exports = function recordView (lvl, db) {
 
       bySchema (kappa, schema, opts) {
         schema = db.schemas.resolveName(schema)
-        const rs = this._query({
+        const rs = query(lvl, {
           ...opts,
           gte: ['si', schema],
           lte: ['si', schema, undefined]
@@ -53,7 +54,7 @@ module.exports = function recordView (lvl, db) {
       },
 
       byId (kappa, id, opts) {
-        const rs = this._query(lvl, {
+        const rs = query(lvl, lvl, {
           ...opts,
           gte: ['is', id],
           lte: ['is', id, undefined]
@@ -63,26 +64,25 @@ module.exports = function recordView (lvl, db) {
 
       byIdAndSchema (kappa, id, schema, opts) {
         schema = db.schemas.resolveName(schema)
-        return this._query({
+        return query(lvl, {
           ...opts,
           gte: ['is', id, schema],
           lte: ['is', id, schema, undefined]
         })
       },
-
-      _query (kappa, opts) {
-        console.log('q', opts)
-        opts.keyEncoding = keyEncoding
-        let rs
-        if (opts.live) {
-          rs = new Live(lvl, opts)
-        } else {
-          rs = lvl.createReadStream(opts)
-        }
-        return rs.pipe(transform())
-      }
     }
   }
+}
+
+function query (db, opts) {
+  opts.keyEncoding = keyEncoding
+  let rs
+  if (opts.live) {
+    rs = new Live(db, opts)
+  } else {
+    rs = db.createReadStream(opts)
+  }
+  return rs.pipe(transform())
 }
 
 function validate (msg) {
@@ -110,7 +110,7 @@ function transform () {
     const { key, value: seq, type } = row
     const idx = key.shift()
     const index = INDEXES[idx]
-    const record = { seq, type }
+    const record = { seq: Number(seq), type }
     for (let i = 0; i < key.length; i++) {
       record[index[i]] = key[i]
     }

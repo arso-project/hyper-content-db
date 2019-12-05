@@ -1,13 +1,20 @@
 const Ajv = require('ajv')
 
+const SCHEMAS = {
+  'core/schema': { type: 'object' },
+  'core/any': { type: 'object' },
+  'core/source': { type: 'object' }
+}
+
 module.exports = class SchemaStore {
   constructor (opts) {
     this.key = opts.key
     this.schemas = {}
     this.ajv = new Ajv()
-    this.put('core/schema', {
-      type: 'object'
-    })
+
+    for (let [name, schema] of Object.entries(SCHEMAS)) {
+      this.put(name, schema)
+    }
   }
 
   put (name, schema) {
@@ -29,13 +36,18 @@ module.exports = class SchemaStore {
   }
 
   list () {
-    return Object.value(this.schemas)
+    return { ...this.schemas }
   }
 
   validate (record) {
     const name = this.resolveName(record.schema)
-    const result = this.ajv.validate(name, record.value)
-    if (!result) this._lastError = new ValidationError(this.ajv.errorsText(), this.ajv.errors)
+    let result = false
+    try {
+      result = this.ajv.validate(name, record.value)
+      if (!result) this._lastError = new ValidationError(this.ajv.errorsText(), this.ajv.errors)
+    } catch (err) {
+      this._lastError = err
+    }
     return result
   }
 

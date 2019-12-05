@@ -20,8 +20,9 @@ const groupSchema = {
   }
 }
 
-tape('basics', async t => {
+tape('replication', async t => {
   const db = new Database()
+  const db2 = new Database({ key: db.key })
   let id1
   let docIds
   await runAll([
@@ -29,15 +30,28 @@ tape('basics', async t => {
     cb => db.putSchema('doc', docSchema, cb),
     cb => db.put({ schema: 'doc', value: { title: 'hello', body: 'world', tags: ['red'] } }, (err, id) => {
       t.error(err)
-      console.log('put', id)
       id1 = id
       process.nextTick(cb)
     }),
     cb => {
-      db.put({ schema: 'doc', value: { title: 'hi', body: 'mars', tags: ['green'] } }, cb)
+      db.putSource(db2.localKey, cb)
+      db2.putSource(db.localKey, cb)
     },
     cb => {
-      db.put({ schema: 'doc', value: { title: 'hello', body: 'moon', tags: ['green'] }, id: id1 }, cb)
+      setTimeout(() => {
+        // t.end()
+      }, 200)
+    },
+    cb => {
+      const stream = db.replicate(true, { live: true })
+      stream.pipe(db2.replicate(false, { live: true })).pipe(stream)
+      setTimeout(cb, 200)
+    },
+    cb => {
+      db2.put({ schema: 'doc', value: { title: 'hi', body: 'mars', tags: ['green'] } }, cb)
+    },
+    cb => {
+      db2.put({ schema: 'doc', value: { title: 'hello', body: 'moon', tags: ['green'] }, id: id1 }, cb)
     },
     cb => {
       // db.kappa.ready('records', () => {
@@ -63,7 +77,6 @@ tape('basics', async t => {
     },
     cb => setTimeout(cb, 100),
     cb => {
-      console.log('here')
       db.put({
         schema: 'group',
         value: {
@@ -72,8 +85,9 @@ tape('basics', async t => {
         }
       }, cb)
     },
+    cb => setTimeout(cb, 100),
     cb => {
-      db.kappa.ready(() => {
+      db2.kappa.ready('kv', () => {
         collect(db.loadStream(db.api.records.get({ schema: 'group' }), (err, records) => {
           t.error(err)
           t.equal(records.length, 1)

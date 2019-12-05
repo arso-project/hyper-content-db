@@ -36,7 +36,6 @@ module.exports = function indexedView (lvl, db) {
 }
 
 function mapToIndex (msg, db) {
-  // console.log('MAP', msg)
   const schema = db.getSchema(msg)
   const ops = []
   const { id, key: source, seq, schema: schemaName, value } = msg
