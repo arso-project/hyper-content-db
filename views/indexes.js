@@ -35,6 +35,7 @@ module.exports = function indexedView (lvl, cstore) {
             if (err) return proxy.destroy(new Error('Invalid schema name.'))
             opts.schema = schemaname
             const lvlopts = queryOptsToLevelOpts(opts)
+            console.log('lvlopts', lvlopts)
             lvl.createReadStream(lvlopts).pipe(proxy)
           })
         }
@@ -68,6 +69,7 @@ function loadAllSchemas (cstore, schemanames, cb) {
 
 function msgToOps (schema, msg) {
   const ops = []
+  if (!schema.properties) return ops
   const { id, source, seq, schema: schemaName, value } = msg
   // TODO: Recursive?
   for (const [prop, def] of Object.entries(schema.properties)) {
@@ -114,6 +116,7 @@ function queryOptsToLevelOpts (opts) {
 
 function transform () {
   return through.obj(function (row, enc, next) {
+    console.log('proxy', row)
     this.push(decodeNode(row))
     next()
   })
