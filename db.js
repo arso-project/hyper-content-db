@@ -7,7 +7,6 @@ const kappaCorestoreSource = require('kappa-core/sources/corestore')
 const collect = require('stream-collector')
 const crypto = require('crypto')
 const levelBaseView = require('kappa-view')
-const State = require('./lib/state')
 const { EventEmitter } = require('events')
 
 const { uuid, through } = require('./util')
@@ -80,8 +79,6 @@ class Database extends EventEmitter {
     this.corestore = opts.corestore || new Corestore(opts.storage || ram)
     this.kappa = new Kappa()
 
-    this.state = new State(sub(this.lvl, 'state'))
-
     this.useRecordView('kv', createKvView)
     this.useRecordView('records', createRecordsView)
     this.useRecordView('indexes', createIndexview)
@@ -101,7 +98,6 @@ class Database extends EventEmitter {
         msgs.forEach(msg => {
           const key = msg.value.key
           self.corestore.get({ key, parent: self.key })
-          // self.multifeed.writer(key, { keyPair }, done)
         })
         done()
         function done () {
@@ -115,13 +111,14 @@ class Database extends EventEmitter {
 
   useRecordView (name, createView, opts) {
     const self = this
-    const db = sub(this.lvl, 'view.' + name)
-    const view = levelBaseView(db, function (db) {
+    const viewdb = sub(this.lvl, 'view.' + name)
+    const statedb = sub(this.lvl, 'state.' + name)
+    const view = levelBaseView(viewdb, function (db) {
       return withDecodedRecords(createView(db, self, opts))
     })
     const source = kappaCorestoreSource({
       store: this.corestore,
-      state: this.state.prefix(name)
+      db: statedb
     })
     this.kappa.use(name, source, view)
   }
