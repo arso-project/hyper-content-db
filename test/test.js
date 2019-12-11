@@ -72,6 +72,7 @@ tape('basics', async t => {
         }
       }, cb)
     },
+    cb => setTimeout(() => cb(), 200),
     cb => {
       db.kappa.ready(() => {
         collect(db.loadStream(db.api.records.get({ schema: 'group' }), (err, records) => {

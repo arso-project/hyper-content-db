@@ -3,15 +3,16 @@ const sub = require('subleveldown')
 const memdb = require('level-mem')
 const Corestore = require('corestore')
 const Kappa = require('kappa-core')
-const kappaCorestoreSource = require('kappa-core/sources/corestore')
+// const kappaCorestoreSource = require('kappa-core/sources/corestore')
 const collect = require('stream-collector')
 const crypto = require('crypto')
 const levelBaseView = require('kappa-view')
 const { EventEmitter } = require('events')
+const Indexer = require('kappa-sparse-indexer')
 
-const { uuid, through } = require('./util')
+const { uuid, through } = require('./lib/util')
 const { Record: RecordEncoding } = require('./lib/messages')
-const SchemaStore = require('./schema')
+const SchemaStore = require('./lib/schema')
 const createKvView = require('./views/kv')
 const createRecordsView = require('./views/records')
 const createIndexview = require('./views/indexes')
@@ -77,6 +78,11 @@ class Database extends EventEmitter {
     this.lvl = opts.db || memdb()
 
     this.corestore = opts.corestore || new Corestore(opts.storage || ram)
+
+    this.indexer = new Indexer(sub(this.lvl, 'indexer'))
+
+    this.corestore.on('feed', feed => this.indexer.add(feed))
+
     this.kappa = new Kappa()
 
     this.useRecordView('kv', createKvView)
@@ -84,6 +90,11 @@ class Database extends EventEmitter {
     this.useRecordView('indexes', createIndexview)
 
     this.useRecordView('schema', () => ({
+      // TODO: Moving the filterering from map to filter breaks everytihng.
+      // The values are not yet decoded there? This should not be the case.
+      // filter (msgs, next) {
+      //   next(msgs.filter(msg => msg.schema === 'core/schema'))
+      // },
       map (msgs, next) {
         msgs = msgs.filter(msg => msg.schema === 'core/schema')
         msgs.forEach(msg => self.schemas.put(msg.id, msg.value))
@@ -92,17 +103,18 @@ class Database extends EventEmitter {
     }))
 
     this.useRecordView('source', () => ({
+      // filter (msgs, next) {
+      //   next(msgs.filter(msg => msg.schema === 'core/source'))
+      // },
       map (msgs, next) {
         msgs = msgs.filter(msg => msg.schema === 'core/source')
-        let pending = msgs.length + 1
         msgs.forEach(msg => {
           const key = msg.value.key
+          // This triggers the 'feed' event on the corestore, which makes the feed
+          // get added to the indexer (see above)
           self.corestore.get({ key, parent: self.key })
         })
-        done()
-        function done () {
-          if (--pending === 0) next()
-        }
+        next()
       }
     }))
 
@@ -112,15 +124,15 @@ class Database extends EventEmitter {
   useRecordView (name, createView, opts) {
     const self = this
     const viewdb = sub(this.lvl, 'view.' + name)
-    const statedb = sub(this.lvl, 'state.' + name)
+    // const statedb = sub(this.lvl, 'state.' + name)
     const view = levelBaseView(viewdb, function (db) {
       return withDecodedRecords(createView(db, self, opts))
     })
-    const source = kappaCorestoreSource({
-      store: this.corestore,
-      db: statedb
-    })
-    this.kappa.use(name, source, view)
+    // const source = kappaCorestoreSource({
+    //   store: this.corestore,
+    //   db: statedb
+    // })
+    this.kappa.use(name, this.indexer.source(), view)
   }
 
   replicate (isInitiator, opts) {
@@ -247,7 +259,6 @@ class Database extends EventEmitter {
         key
       }
     }
-    console.log('put', record)
     this.put(record, cb)
   }
 

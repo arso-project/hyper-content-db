@@ -1,5 +1,5 @@
 const umkv = require('unordered-materialized-kv')
-const { keyseq } = require('../util')
+const { keyseq } = require('../lib/util')
 
 module.exports = function kvView (lvl, db) {
   const kv = umkv(lvl, {

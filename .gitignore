@@ -1,3 +1,5 @@
 node_modules
 pnpm-lock.yaml
+pnpm-debug.log
 package-lock.json
+_old

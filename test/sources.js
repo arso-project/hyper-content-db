@@ -27,6 +27,7 @@ tape('replication', async t => {
   let docIds
   await runAll([
     cb => db.ready(cb),
+    cb => db2.ready(cb),
     cb => db.putSchema('doc', docSchema, cb),
     cb => db.put({ schema: 'doc', value: { title: 'hello', body: 'world', tags: ['red'] } }, (err, id) => {
       t.error(err)

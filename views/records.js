@@ -2,7 +2,7 @@ const through = require('through2')
 const keyEncoding = require('charwise')
 const { opsForRecords } = require('./helpers')
 const Live = require('level-live')
-const collect = require('stream-collector')
+// const collect = require('stream-collector')
 
 const INDEXES = {
   is: ['id', 'schema', 'key'],
