@@ -2,6 +2,8 @@
 
 A [Kappa-style](http://kappa-architecture.com) peer-to-peer content database, on top of hyperdrives.
 
+**Note: I'm not using this anymore. Try out [kappa-record-db](https://github.com/arso-project/kappa-record-db) instead.**
+
 ## Installation
 
 #### `npm install hyper-content-db`
